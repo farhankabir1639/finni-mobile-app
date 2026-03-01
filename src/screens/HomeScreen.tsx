@@ -1,0 +1,529 @@
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TextInput,
+  TouchableOpacity,
+  Pressable,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
+import { colors } from '../lib/theme';
+import { chatAgent } from '../lib/agents';
+
+type Message = { id: string; role: 'user' | 'assistant'; content: string };
+
+function getGreetingBase(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+function getFirstName(fullName: string | null | undefined): string | null {
+  if (!fullName?.trim()) return null;
+  return fullName.trim().split(/\s+/)[0] ?? null;
+}
+
+function formatDate(date: Date): string {
+  return date.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
+const QUICK_CHIPS = [
+  "💰 How's my budget?",
+  '📊 Show spending',
+  '💡 Save money tips',
+  '📝 Log expense',
+];
+
+export default function HomeScreen() {
+  const navigation = useNavigation();
+  const { user } = useAuth();
+  const [firstName, setFirstName] = useState<string | null>(null);
+  const [profileLoaded, setProfileLoaded] = useState(false);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [inputText, setInputText] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [typingDots, setTypingDots] = useState('.');
+  const [todaySpent, setTodaySpent] = useState(0);
+  const [monthUsedPct, setMonthUsedPct] = useState(0);
+  const [budgetLeft, setBudgetLeft] = useState(0);
+  const [chatContext, setChatContext] = useState<{
+    profile?: { name?: string; currency?: string } | null;
+    categories?: { id: string; name: string; emoji?: string; budget?: number; spent?: number }[] | null;
+    recentTransactions?: { withdrawal?: number; deposit?: number; description: string | null; category: string | null; date: string; type?: string }[] | null;
+    goals?: { name: string; target_amount?: number; current_amount?: number }[] | null;
+  }>({});
+  const scrollRef = useRef<ScrollView>(null);
+  const welcomeAddedRef = useRef(false);
+
+  const fetchChatContext = useCallback(async () => {
+    if (!user?.id) return;
+    const [profileRes, categoriesRes, txRes, goalsRes] = await Promise.all([
+      supabase.from('profiles').select('name, currency').eq('id', user.id).single(),
+      supabase.from('categories').select('id, name, emoji, budget, spent').eq('user_id', user.id),
+      supabase.from('transactions').select('withdrawal, deposit, description, category, date, type').eq('user_id', user.id).order('date', { ascending: false }).limit(10),
+      supabase.from('financial_goals').select('name, target_amount, current_amount').eq('user_id', user.id),
+    ]);
+    setChatContext({
+      profile: profileRes.data ? { name: profileRes.data.name, currency: profileRes.data.currency } : null,
+      categories: (categoriesRes.data as { id: string; name: string; emoji?: string; budget?: number; spent?: number }[]) ?? [],
+      recentTransactions: (txRes.data as { withdrawal?: number; deposit?: number; description: string | null; category: string | null; date: string; type?: string }[]) ?? [],
+      goals: (goalsRes.data as { name: string; target_amount?: number; current_amount?: number }[]) ?? [],
+    });
+  }, [user?.id]);
+
+  useEffect(() => {
+    fetchChatContext();
+  }, [fetchChatContext]);
+
+  const fetchStats = useCallback(async () => {
+    if (!user?.id) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
+    const { data: txData } = await supabase
+      .from('transactions')
+      .select('withdrawal, deposit, date, type')
+      .eq('user_id', user.id)
+      .gte('date', monthStart);
+    let todayTotal = 0;
+    let monthTotal = 0;
+    (txData ?? []).forEach((t) => {
+      if (t.type === 'expense') {
+        const w = Number(t.withdrawal) || 0;
+        if (t.date?.startsWith(today)) todayTotal += w;
+        monthTotal += w;
+      }
+    });
+    setTodaySpent(todayTotal);
+    const monthlyBudget = 500;
+    setMonthUsedPct(monthlyBudget > 0 ? Math.min(100, Math.round((monthTotal / monthlyBudget) * 100)) : 0);
+    setBudgetLeft(Math.max(0, monthlyBudget - monthTotal));
+  }, [user?.id]);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
+
+  const today = new Date();
+  const greeting = (() => {
+    const base = getGreetingBase();
+    return firstName ? `${base}, ${firstName}! 👋` : `${base}! 👋`;
+  })();
+
+  useEffect(() => {
+    if (!user?.id) {
+      setProfileLoaded(true);
+      return;
+    }
+    supabase
+      .from('profiles')
+      .select('name')
+      .eq('id', user.id)
+      .single()
+      .then(({ data }) => {
+        setFirstName(getFirstName(data?.name));
+        setProfileLoaded(true);
+      })
+      .catch(() => {
+        setFirstName(null);
+        setProfileLoaded(true);
+      });
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!welcomeAddedRef.current && profileLoaded) {
+      welcomeAddedRef.current = true;
+      const name = firstName ?? 'there';
+      setMessages([
+        {
+          id: 'welcome',
+          role: 'assistant',
+          content: `Hi ${name}! 👋 I'm Finni. Ask me anything about your finances or just say 'spent $X on Y' to log expenses`,
+        },
+      ]);
+    }
+  }, [profileLoaded, firstName]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollToEnd({ animated: true });
+  }, [messages, isTyping]);
+
+  useEffect(() => {
+    if (!isTyping) return;
+    const id = setInterval(() => {
+      setTypingDots((d) => (d.length >= 3 ? '.' : d + '.'));
+    }, 400);
+    return () => clearInterval(id);
+  }, [isTyping]);
+
+  const handleSend = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || !user?.id) return;
+
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: trimmed,
+    };
+    setMessages((m) => [...m, userMsg]);
+    setInputText('');
+    setIsTyping(true);
+
+    try {
+      const { response, transaction } = await chatAgent(trimmed, user.id, [...messages, userMsg], chatContext);
+      setIsTyping(false);
+
+      const aiMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: response,
+      };
+      setMessages((m) => [...m, aiMsg]);
+
+      if (transaction) {
+        fetchStats();
+        fetchChatContext();
+      }
+    } catch {
+      setIsTyping(false);
+      const errMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: "I'm having trouble connecting. Please try again 🔄",
+      };
+      setMessages((m) => [...m, errMsg]);
+    }
+  };
+
+  const handleChipPress = (chip: string) => {
+    const text = chip.replace(/^[^\s]+\s/, '').trim();
+    handleSend(text);
+  };
+
+  const isConversationEmpty = messages.length <= 1;
+
+  return (
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
+        {/* TOP SECTION - fixed, not scrollable */}
+        <View style={styles.topSection}>
+          <View style={styles.header}>
+            <Text style={styles.greeting}>{greeting}</Text>
+            <Pressable
+              style={styles.headerIconButton}
+              hitSlop={12}
+              onPress={() => navigation.navigate('Settings' as never)}
+            >
+              <Text style={styles.headerIcon}>⚙️</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.date}>{formatDate(today)}</Text>
+
+          <View style={styles.statsRow}>
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>Today</Text>
+              <Text style={styles.statValue}>${todaySpent.toFixed(2)}</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>Month</Text>
+              <Text style={styles.statValue}>{monthUsedPct}% used</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>Left</Text>
+              <Text style={styles.statValue}>${budgetLeft.toFixed(2)}</Text>
+            </View>
+          </View>
+
+          <View style={styles.divider} />
+        </View>
+
+        {/* CHAT SECTION - flex 1, scrollable */}
+        <ScrollView
+          ref={scrollRef}
+          style={styles.chatScroll}
+          contentContainerStyle={styles.chatContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {messages.map((msg) =>
+            msg.role === 'assistant' ? (
+              <View key={msg.id} style={styles.assistantRow}>
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>F</Text>
+                </View>
+                <View style={styles.assistantBubble}>
+                  <Text style={styles.bubbleText}>{msg.content}</Text>
+                </View>
+              </View>
+            ) : (
+              <View key={msg.id} style={styles.userRow}>
+                <View style={styles.userBubble}>
+                  <Text style={styles.bubbleText}>{msg.content}</Text>
+                </View>
+              </View>
+            )
+          )}
+          {isTyping && (
+            <View style={styles.assistantRow}>
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>F</Text>
+              </View>
+              <View style={styles.typingBubble}>
+                <Text style={styles.typingText}>{typingDots}</Text>
+              </View>
+            </View>
+          )}
+        </ScrollView>
+
+        {/* Suggestion chips - only when chat is empty */}
+        {isConversationEmpty && (
+          <ScrollView
+            horizontal
+            style={styles.chipsScroll}
+            contentContainerStyle={styles.chipsContent}
+            showsHorizontalScrollIndicator={false}
+          >
+            {QUICK_CHIPS.map((chip) => (
+              <TouchableOpacity
+                key={chip}
+                style={styles.chip}
+                onPress={() => handleChipPress(chip)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.chipText}>{chip}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+
+        {/* BOTTOM INPUT BAR - fixed */}
+        <View style={styles.inputBar}>
+          <TextInput
+            style={styles.input}
+            placeholder="Message Finni..."
+            placeholderTextColor={colors.textSecondary}
+            value={inputText}
+            onChangeText={setInputText}
+            onSubmitEditing={() => handleSend(inputText)}
+            multiline
+            maxLength={500}
+            editable={!isTyping}
+          />
+          <TouchableOpacity
+            style={[styles.sendButton, !inputText.trim() && styles.sendDisabled]}
+            onPress={() => handleSend(inputText)}
+            disabled={!inputText.trim()}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.sendIcon}>➤</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  container: {
+    flex: 1,
+    flexDirection: 'column',
+  },
+  topSection: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  greeting: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  headerIconButton: {
+    padding: 4,
+  },
+  headerIcon: {
+    fontSize: 24,
+  },
+  date: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginBottom: 16,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 12,
+  },
+  statCard: {
+    flex: 1,
+    height: 70,
+    backgroundColor: colors.cardBackground,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 12,
+    justifyContent: 'center',
+  },
+  statLabel: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginBottom: 4,
+  },
+  statValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: colors.border,
+  },
+  chatScroll: {
+    flex: 1,
+  },
+  chatContent: {
+    padding: 16,
+    paddingBottom: 24,
+  },
+  assistantRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    marginBottom: 12,
+    maxWidth: '85%',
+    alignSelf: 'flex-start',
+  },
+  avatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  avatarText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  assistantBubble: {
+    backgroundColor: colors.cardBackground,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 12,
+    maxWidth: '85%',
+  },
+  typingBubble: {
+    backgroundColor: colors.cardBackground,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 12,
+    minWidth: 48,
+  },
+  typingText: {
+    fontSize: 16,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  userRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: 12,
+  },
+  userBubble: {
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    padding: 12,
+    maxWidth: '85%',
+  },
+  bubbleText: {
+    fontSize: 16,
+    color: colors.textPrimary,
+  },
+  chipsScroll: {
+    maxHeight: 48,
+    marginBottom: 8,
+  },
+  chipsContent: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  chip: {
+    flexShrink: 0,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  chipText: {
+    fontSize: 14,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  inputBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    backgroundColor: colors.cardBackground,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    padding: 12,
+    gap: 8,
+  },
+  input: {
+    flex: 1,
+    backgroundColor: colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: colors.textPrimary,
+    maxHeight: 100,
+  },
+  sendButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sendDisabled: {
+    opacity: 0.4,
+  },
+  sendIcon: {
+    fontSize: 18,
+    color: colors.textPrimary,
+    fontWeight: '700',
+  },
+});
