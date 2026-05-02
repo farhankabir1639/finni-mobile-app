@@ -14,6 +14,8 @@
     "ios": {
       "supportsTablet": true
     },
+    "scheme": "finni",
+    "newArchEnabled": true,
     "android": {
       "package": "com.finni.app",
       "versionCode": 1,
@@ -29,6 +31,9 @@
       "eas": {
         "projectId": "75db960b-eb7e-4d0b-9bf3-72c5393b8e54"
       }
-    }
+    },
+    "plugins": [
+      "expo-localization"
+    ]
   }
 }

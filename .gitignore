@@ -30,8 +30,13 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
+# local env files — NEVER commit real secrets
+.env
+.env.local
 .env*.local
+
+# EAS — use EAS Secrets for CI/CD, not plaintext keys in this file
+# eas.json is committed but must only contain $VAR references, never raw keys
 
 # typescript
 *.tsbuildinfo
@@ -39,4 +44,3 @@ yarn-error.*
 # generated native folders
 /ios
 /android
-.env

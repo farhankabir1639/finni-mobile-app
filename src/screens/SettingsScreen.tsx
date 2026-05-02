@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
+import { useProfile, CURRENCIES } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 
@@ -51,20 +52,12 @@ function getInitial(name: string | null | undefined): string {
 export default function SettingsScreen() {
   const navigation = useNavigation();
   const { user, signOut } = useAuth();
-  const [profileName, setProfileName] = useState<string | null>(null);
+  const { profile, refreshProfile } = useProfile();
   const [categoriesModalVisible, setCategoriesModalVisible] = useState(false);
   const [goalsModalVisible, setGoalsModalVisible] = useState(false);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    supabase
-      .from('profiles')
-      .select('name')
-      .eq('id', user.id)
-      .single()
-      .then(({ data }) => setProfileName(data?.name ?? null))
-      .catch(() => setProfileName(null));
-  }, [user?.id]);
+  const [editProfileVisible, setEditProfileVisible] = useState(false);
+  const [currencyModalVisible, setCurrencyModalVisible] = useState(false);
+  const [incomeModalVisible, setIncomeModalVisible] = useState(false);
 
   const handleSignOut = async () => {
     try {
@@ -74,7 +67,7 @@ export default function SettingsScreen() {
     }
   };
 
-  const displayName = profileName?.trim() || 'User';
+  const displayName = profile.name?.trim() || 'User';
   const email = user?.email ?? '';
 
   const SettingItem = ({
@@ -118,7 +111,7 @@ export default function SettingsScreen() {
         {/* Profile card */}
         <View style={styles.profileCard}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{getInitial(profileName)}</Text>
+            <Text style={styles.avatarText}>{getInitial(profile.name)}</Text>
           </View>
           <Text style={styles.profileName}>{displayName}</Text>
           <Text style={styles.profileEmail}>{email}</Text>
@@ -126,8 +119,9 @@ export default function SettingsScreen() {
 
         {/* My Account */}
         <Section title="My Account">
-          <SettingItem label="Edit Profile" onPress={() => Alert.alert('Coming Soon', 'Edit profile will be available soon.')} />
-          <SettingItem label="Currency" onPress={() => Alert.alert('Coming Soon', 'Currency settings will be available soon.')} />
+          <SettingItem label="Edit Profile" onPress={() => setEditProfileVisible(true)} />
+          <SettingItem label="Currency" onPress={() => setCurrencyModalVisible(true)} />
+          <SettingItem label="Income" onPress={() => setIncomeModalVisible(true)} />
         </Section>
 
         {/* Finance */}
@@ -178,6 +172,61 @@ export default function SettingsScreen() {
           />
         </View>
       </Modal>
+
+      {/* Edit Profile Modal */}
+      <Modal
+        visible={editProfileVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setEditProfileVisible(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: colors.background }}>
+          <EditProfileModal
+            userId={user?.id ?? ''}
+            currentName={profile.name}
+            onClose={() => setEditProfileVisible(false)}
+            onSave={async () => {
+              await refreshProfile();
+              setEditProfileVisible(false);
+            }}
+          />
+        </View>
+      </Modal>
+
+      {/* Currency Modal */}
+      <Modal
+        visible={currencyModalVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setCurrencyModalVisible(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: colors.background }}>
+          <CurrencyModal
+            userId={user?.id ?? ''}
+            currentCurrency={profile.currency}
+            onClose={() => setCurrencyModalVisible(false)}
+            onSave={async () => {
+              await refreshProfile();
+              setCurrencyModalVisible(false);
+            }}
+          />
+        </View>
+      </Modal>
+
+      {/* Income Modal */}
+      <Modal
+        visible={incomeModalVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setIncomeModalVisible(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: '#0A0F1E' }}>
+          <IncomeModal
+            userId={user?.id ?? ''}
+            onClose={() => setIncomeModalVisible(false)}
+          />
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -193,6 +242,13 @@ function CategoriesModal({ userId, onClose }: { userId: string; onClose: () => v
   const [addBudget, setAddBudget] = useState('');
   const [addBudgetType, setAddBudgetType] = useState<BudgetPeriod>('monthly');
   const [saving, setSaving] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editEmoji, setEditEmoji] = useState('');
+  const [editColor, setEditColor] = useState('#6366F1');
+  const [updating, setUpdating] = useState(false);
+
+  const EDIT_COLOR_PALETTE = ['#6366F1', '#8B5CF6', '#EC4899', '#F59E0B', '#10B981', '#3B82F6', '#EF4444', '#F97316'];
 
   const fetchCategories = async () => {
     if (!userId) return;
@@ -219,9 +275,7 @@ function CategoriesModal({ userId, onClose }: { userId: string; onClose: () => v
   useEffect(() => {
     if (!userId) return;
     setLoading(true);
-    fetchCategories();
 
-    // Subscribe to realtime changes on categories table
     const subscription = supabase
       .channel('categories-changes')
       .on(
@@ -233,10 +287,20 @@ function CategoriesModal({ userId, onClose }: { userId: string; onClose: () => v
           filter: `user_id=eq.${userId}`,
         },
         () => {
-          fetchCategories();
+          fetchCategories().catch((e) => {
+            console.error('[Categories] Realtime refetch error:', e);
+            setLoading(false);
+          });
         }
       )
       .subscribe();
+
+    fetchCategories().catch((e) => {
+      console.error('[Categories] Initial fetch error:', e);
+      setLoading(false);
+      setCategories([]);
+      supabase.removeChannel(subscription);
+    });
 
     return () => {
       supabase.removeChannel(subscription);
@@ -285,27 +349,61 @@ function CategoriesModal({ userId, onClose }: { userId: string; onClose: () => v
     fetchCategories();
   };
 
-  const handleDeleteCategory = async (id: string) => {
-    // First nullify all transactions with this category
-    const { error: txError } = await supabase
-      .from('transactions')
-      .update({ category_id: null })
-      .eq('category_id', id);
-
-    if (txError) {
-      console.warn('Transaction update error:', txError);
+  const handleUpdateCategory = async () => {
+    if (!editingCategory || !userId) return;
+    const name = editName.trim();
+    if (!name) {
+      Alert.alert('Error', 'Category name cannot be empty.');
       return;
     }
-
-    // Then delete the category
-    const { error } = await supabase.from('categories').delete().eq('id', id);
-
+    setUpdating(true);
+    const { error } = await supabase
+      .from('categories')
+      .update({ name, emoji: editEmoji.trim() || '💰', color: editColor })
+      .eq('id', editingCategory.id)
+      .eq('user_id', userId);
+    setUpdating(false);
     if (error) {
-      console.warn('Category delete error:', error);
+      Alert.alert('Error', `Could not update category: ${error.message || JSON.stringify(error)}`);
       return;
     }
+    setEditingCategory(null);
+    fetchCategories();
+  };
 
-    setCategories((c) => c.filter((x) => x.id !== id));
+  const handleDeleteCategory = (id: string) => {
+    Alert.alert(
+      'Delete Category',
+      'Deleting this category will mark all linked transactions as Uncategorized. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const { error: txError } = await supabase
+              .from('transactions')
+              .update({ category_id: null })
+              .eq('category_id', id)
+              .eq('user_id', userId);
+            if (txError) {
+              console.warn('Transaction update error:', txError);
+              return;
+            }
+            const { error } = await supabase
+              .from('categories')
+              .delete()
+              .eq('id', id)
+              .eq('user_id', userId);
+            if (error) {
+              console.warn('Category delete error:', error);
+              return;
+            }
+            setCategories((c) => c.filter((x) => x.id !== id));
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -317,7 +415,7 @@ function CategoriesModal({ userId, onClose }: { userId: string; onClose: () => v
         <View style={styles.modalHeader}>
           <Text style={styles.modalHeaderTitle}>Categories</Text>
           <View style={styles.modalHeaderRight}>
-            {!showAddForm && (
+            {!showAddForm && !editingCategory && (
               <TouchableOpacity
                 style={styles.addButton}
                 onPress={() => setShowAddForm(true)}
@@ -407,6 +505,60 @@ function CategoriesModal({ userId, onClose }: { userId: string; onClose: () => v
           </View>
         ) : null}
 
+        {editingCategory ? (
+          <View style={styles.addForm}>
+            <Text style={styles.formLabel}>Edit Category</Text>
+            <TextInput
+              style={styles.formInput}
+              placeholder="Category name"
+              placeholderTextColor={colors.textSecondary}
+              value={editName}
+              onChangeText={setEditName}
+            />
+            <TextInput
+              style={styles.formInput}
+              placeholder="Emoji (e.g. 🍔)"
+              placeholderTextColor={colors.textSecondary}
+              value={editEmoji}
+              onChangeText={setEditEmoji}
+            />
+            <Text style={styles.formLabel}>Color</Text>
+            <View style={styles.editColorRow}>
+              {EDIT_COLOR_PALETTE.map((c) => (
+                <TouchableOpacity
+                  key={c}
+                  style={[
+                    styles.colorCircle,
+                    { backgroundColor: c },
+                    editColor === c && styles.colorCircleSelected,
+                  ]}
+                  onPress={() => setEditColor(c)}
+                  activeOpacity={0.8}
+                />
+              ))}
+            </View>
+            <View style={styles.formButtons}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setEditingCategory(null)}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.saveButton}
+                onPress={handleUpdateCategory}
+                disabled={updating || !editName.trim()}
+              >
+                {updating ? (
+                  <ActivityIndicator size="small" color={colors.textPrimary} />
+                ) : (
+                  <Text style={styles.saveButtonText}>Save</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
+
         <ScrollView
           style={styles.modalScroll}
           contentContainerStyle={styles.modalScrollContent}
@@ -445,10 +597,421 @@ function CategoriesModal({ userId, onClose }: { userId: string; onClose: () => v
                     </View>
                   </View>
                 </View>
-                <TouchableOpacity
-                  onPress={() => handleDeleteCategory(cat.id)}
-                  style={styles.deleteButton}
-                >
+                <View style={styles.categoryRowActions}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setEditingCategory(cat);
+                      setEditName(cat.name);
+                      setEditEmoji(cat.emoji || '💰');
+                      setEditColor(cat.color || '#6366F1');
+                      setShowAddForm(false);
+                    }}
+                    style={styles.editButton}
+                  >
+                    <Text style={styles.editButtonText}>✏️</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => handleDeleteCategory(cat.id)}
+                    style={styles.deleteButton}
+                  >
+                    <Text style={styles.deleteButtonText}>🗑️</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+function EditProfileModal({
+  userId,
+  currentName,
+  onClose,
+  onSave,
+}: {
+  userId: string;
+  currentName: string | null;
+  onClose: () => void;
+  onSave: () => Promise<void>;
+}) {
+  const [name, setName] = useState(currentName ?? '');
+  const [monthlyBudget, setMonthlyBudget] = useState('');
+  const [location, setLocation] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    supabase
+      .from('profiles')
+      .select('name, monthly_budget, location')
+      .eq('id', userId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) {
+          setName((data as any).name ?? '');
+          setMonthlyBudget(String((data as any).monthly_budget ?? '') || '');
+          setLocation((data as any).location ?? '');
+        }
+      });
+  }, [userId]);
+
+  const handleSave = async () => {
+    if (!userId) return;
+    setSaving(true);
+    const payload: Record<string, unknown> = { id: userId, name: name.trim(), location: location.trim() };
+    const budget = parseFloat(monthlyBudget);
+    if (!isNaN(budget) && budget >= 0) payload.monthly_budget = budget;
+    const { error } = await supabase.from('profiles').upsert(payload);
+    setSaving(false);
+    if (error) {
+      Alert.alert('Error', `Could not save profile: ${error.message}`);
+      return;
+    }
+    Alert.alert('Saved', 'Profile updated successfully.');
+    await onSave();
+  };
+
+  return (
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+      <View style={styles.modalHeader}>
+        <Text style={styles.modalHeaderTitle}>Edit Profile</Text>
+        <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.closeButton}>
+          <Text style={styles.closeButtonText}>✕</Text>
+        </TouchableOpacity>
+      </View>
+      <ScrollView style={styles.modalScroll} contentContainerStyle={[styles.modalScrollContent, { paddingTop: 24 }]}>
+        <Text style={styles.formLabel}>Display Name</Text>
+        <TextInput
+          style={styles.formInput}
+          placeholder="Your name"
+          placeholderTextColor={colors.textSecondary}
+          value={name}
+          onChangeText={setName}
+        />
+        <Text style={styles.formLabel}>Location</Text>
+        <TextInput
+          style={styles.formInput}
+          placeholder="e.g. Dhaka, Bangladesh"
+          placeholderTextColor={colors.textSecondary}
+          value={location}
+          onChangeText={setLocation}
+        />
+        <Text style={styles.formLabel}>Monthly Budget</Text>
+        <TextInput
+          style={styles.formInput}
+          placeholder="e.g. 1500"
+          placeholderTextColor={colors.textSecondary}
+          value={monthlyBudget}
+          onChangeText={setMonthlyBudget}
+          keyboardType="decimal-pad"
+        />
+        <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={saving}>
+          {saving ? (
+            <ActivityIndicator size="small" color={colors.textPrimary} />
+          ) : (
+            <Text style={styles.saveButtonText}>Save Changes</Text>
+          )}
+        </TouchableOpacity>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function CurrencyModal({
+  userId,
+  currentCurrency,
+  onClose,
+  onSave,
+}: {
+  userId: string;
+  currentCurrency: string;
+  onClose: () => void;
+  onSave: () => Promise<void>;
+}) {
+  const [selected, setSelected] = useState(currentCurrency);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!userId) return;
+    setSaving(true);
+    const { error } = await supabase
+      .from('profiles')
+      .upsert({ id: userId, currency: selected });
+    setSaving(false);
+    if (error) {
+      Alert.alert('Error', `Could not save currency: ${error.message}`);
+      return;
+    }
+    await onSave();
+  };
+
+  return (
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+      <View style={styles.modalHeader}>
+        <Text style={styles.modalHeaderTitle}>Currency</Text>
+        <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.closeButton}>
+          <Text style={styles.closeButtonText}>✕</Text>
+        </TouchableOpacity>
+      </View>
+      <ScrollView style={styles.modalScroll} contentContainerStyle={[styles.modalScrollContent, { paddingTop: 16 }]}>
+        {CURRENCIES.map((c) => {
+          const active = selected === c.code;
+          return (
+            <TouchableOpacity
+              key={c.code}
+              style={[styles.currencyItem, active && styles.currencyItemActive]}
+              onPress={() => setSelected(c.code)}
+              activeOpacity={0.8}
+            >
+              <View style={styles.currencyItemLeft}>
+                <Text style={[styles.currencySymbol, active && styles.currencySymbolActive]}>{c.symbol}</Text>
+                <View>
+                  <Text style={[styles.currencyCode, active && styles.currencyCodeActive]}>{c.code}</Text>
+                  <Text style={styles.currencyName}>{c.name}</Text>
+                </View>
+              </View>
+              {active && <Text style={styles.currencyCheck}>✓</Text>}
+            </TouchableOpacity>
+          );
+        })}
+        <TouchableOpacity style={[styles.saveButton, { marginTop: 24 }]} onPress={handleSave} disabled={saving}>
+          {saving ? (
+            <ActivityIndicator size="small" color={colors.textPrimary} />
+          ) : (
+            <Text style={styles.saveButtonText}>Save Currency</Text>
+          )}
+        </TouchableOpacity>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+type IncomeRecord = {
+  id: string;
+  user_id: string;
+  amount: number;
+  frequency: 'monthly' | 'weekly' | 'annual';
+  label: string;
+  start_date?: string;
+  created_at?: string;
+};
+
+function calcMonthlyIncome(record: IncomeRecord): number {
+  const amt = Number(record.amount) || 0;
+  if (record.frequency === 'weekly') return amt * 4.33;
+  if (record.frequency === 'annual') return amt / 12;
+  return amt;
+}
+
+function IncomeModal({ userId, onClose }: { userId: string; onClose: () => void }) {
+  const { currencySymbol } = useProfile();
+  const [incomeRecords, setIncomeRecords] = useState<IncomeRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addLabel, setAddLabel] = useState('');
+  const [addAmount, setAddAmount] = useState('');
+  const [addFrequency, setAddFrequency] = useState<'monthly' | 'weekly' | 'annual'>('monthly');
+  const [saving, setSaving] = useState(false);
+
+  const fetchIncome = async () => {
+    if (!userId) return;
+    const { data, error } = await supabase
+      .from('income')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    setLoading(false);
+    if (error) {
+      console.error('[Income] Fetch error:', error);
+      setIncomeRecords([]);
+      return;
+    }
+    setIncomeRecords((data as IncomeRecord[]) ?? []);
+  };
+
+  useEffect(() => {
+    if (userId) {
+      setLoading(true);
+      fetchIncome();
+    }
+  }, [userId]);
+
+  const totalMonthlyIncome = incomeRecords.reduce((sum, r) => sum + calcMonthlyIncome(r), 0);
+
+  const handleAdd = async () => {
+    const label = addLabel.trim() || 'Income';
+    const amount = parseFloat(addAmount);
+    if (!userId) {
+      Alert.alert('Error', 'You must be logged in to add income.');
+      return;
+    }
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert('Error', 'Please enter a valid amount.');
+      return;
+    }
+    if (!addLabel.trim()) {
+      Alert.alert('Error', 'Please enter a label.');
+      return;
+    }
+    setSaving(true);
+    const { error } = await supabase.from('income').insert({
+      user_id: userId,
+      label,
+      amount,
+      frequency: addFrequency,
+    });
+    setSaving(false);
+    if (error) {
+      Alert.alert('Error', `Could not save income: ${error.message || error.details || JSON.stringify(error)}`);
+      return;
+    }
+    setAddLabel('');
+    setAddAmount('');
+    setAddFrequency('monthly');
+    setShowAddForm(false);
+    fetchIncome();
+  };
+
+  const handleDelete = async (id: string) => {
+    const { error } = await supabase.from('income').delete().eq('id', id);
+    if (error) {
+      console.warn('[Income] Delete error:', error);
+      return;
+    }
+    setIncomeRecords((r) => r.filter((x) => x.id !== id));
+  };
+
+  const freqSuffix = (f: string) => {
+    if (f === 'weekly') return '/wk';
+    if (f === 'annual') return '/yr';
+    return '/mo';
+  };
+
+  return (
+    <SafeAreaView style={styles.fullModal} edges={['top', 'bottom']}>
+      <KeyboardAvoidingView
+        style={styles.fullModalInner}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalHeaderTitle}>Income</Text>
+          <View style={styles.modalHeaderRight}>
+            {!showAddForm && (
+              <TouchableOpacity
+                style={styles.addButton}
+                onPress={() => setShowAddForm(true)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.addButtonText}>Add Income</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.closeButton}>
+              <Text style={styles.closeButtonText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View style={styles.incomeBanner}>
+          <Text style={styles.incomeBannerLabel}>Total Monthly Income</Text>
+          <Text style={styles.incomeBannerAmount}>
+            {currencySymbol}{totalMonthlyIncome.toFixed(2)}
+          </Text>
+        </View>
+
+        {showAddForm && (
+          <View style={styles.addForm}>
+            <TextInput
+              style={styles.formInput}
+              placeholder="Label (e.g. Salary, Freelance)"
+              placeholderTextColor={colors.textSecondary}
+              value={addLabel}
+              onChangeText={setAddLabel}
+            />
+            <TextInput
+              style={styles.formInput}
+              placeholder="Amount"
+              placeholderTextColor={colors.textSecondary}
+              value={addAmount}
+              onChangeText={setAddAmount}
+              keyboardType="decimal-pad"
+            />
+            <Text style={styles.formLabel}>Frequency</Text>
+            <View style={styles.periodChipsRow}>
+              {(['monthly', 'weekly', 'annual'] as const).map((opt) => {
+                const active = addFrequency === opt;
+                return (
+                  <TouchableOpacity
+                    key={opt}
+                    style={[styles.periodChip, active && styles.periodChipActive]}
+                    onPress={() => setAddFrequency(opt)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.periodChipText, active && styles.periodChipTextActive]}>
+                      {opt.charAt(0).toUpperCase() + opt.slice(1)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <View style={styles.formButtons}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => {
+                  setShowAddForm(false);
+                  setAddLabel('');
+                  setAddAmount('');
+                  setAddFrequency('monthly');
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.saveButton}
+                onPress={handleAdd}
+                disabled={saving || !addLabel.trim() || !addAmount.trim()}
+              >
+                {saving ? (
+                  <ActivityIndicator size="small" color={colors.textPrimary} />
+                ) : (
+                  <Text style={styles.saveButtonText}>Save</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        <ScrollView
+          style={styles.modalScroll}
+          contentContainerStyle={styles.modalScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {loading ? (
+            <View style={styles.modalLoading}>
+              <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+          ) : incomeRecords.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>No income sources</Text>
+              <Text style={styles.emptySubtitle}>Add your first income source</Text>
+              <TouchableOpacity style={styles.emptyButton} onPress={() => setShowAddForm(true)}>
+                <Text style={styles.emptyButtonText}>Add Income</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            incomeRecords.map((record) => (
+              <View key={record.id} style={styles.incomeItem}>
+                <View style={styles.incomeItemLeft}>
+                  <Text style={styles.incomeLabel}>{record.label}</Text>
+                  <Text style={styles.incomeSubLabel}>
+                    {currencySymbol}{Number(record.amount).toFixed(2)}{freqSuffix(record.frequency)}
+                    {' · '}
+                    {currencySymbol}{calcMonthlyIncome(record).toFixed(2)}/mo
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => handleDelete(record.id)} style={styles.deleteButton}>
                   <Text style={styles.deleteButtonText}>🗑️</Text>
                 </TouchableOpacity>
               </View>
@@ -468,6 +1031,7 @@ const GOAL_TYPES = [
 ] as const;
 
 function GoalsModal({ userId, onClose }: { userId: string; onClose: () => void }) {
+  const { currencySymbol } = useProfile();
   const [goals, setGoals] = useState<Goal[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -479,6 +1043,7 @@ function GoalsModal({ userId, onClose }: { userId: string; onClose: () => void }
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedGoalType, setSelectedGoalType] = useState<string>('saving');
   const [saving, setSaving] = useState(false);
+  const [dateError, setDateError] = useState('');
 
   const fetchGoals = () => {
     if (!userId) return;
@@ -494,10 +1059,6 @@ function GoalsModal({ userId, onClose }: { userId: string; onClose: () => void }
           return;
         }
         setGoals((data as Goal[]) ?? []);
-      })
-      .catch(() => {
-        setLoading(false);
-        setGoals([]);
       });
   };
 
@@ -514,8 +1075,7 @@ function GoalsModal({ userId, onClose }: { userId: string; onClose: () => void }
           return;
         }
         setCategories((data as Category[]) ?? []);
-      })
-      .catch(() => setCategories([]));
+      });
   };
 
   useEffect(() => {
@@ -542,6 +1102,7 @@ function GoalsModal({ userId, onClose }: { userId: string; onClose: () => void }
     });
     if (!goalName || !userId) return;
     if (!targetAmount) return;
+    if (dateError) return;
     setSaving(true);
     const targetDateVal = targetDate
       ? new Date(targetDate).toISOString()
@@ -556,8 +1117,8 @@ function GoalsModal({ userId, onClose }: { userId: string; onClose: () => void }
       goal_type: selectedGoalType,
       status: 'in_progress',
       category_id: selectedCategoryId || null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     };
     const { error } = await supabase.from('financial_goals').insert(payload);
     setSaving(false);
@@ -570,6 +1131,7 @@ function GoalsModal({ userId, onClose }: { userId: string; onClose: () => void }
     setAddTarget('');
     setAddCurrent('');
     setAddDate('');
+    setDateError('');
     setSelectedCategoryId(null);
     setSelectedGoalType('saving');
     setShowAddForm(false);
@@ -703,12 +1265,21 @@ function GoalsModal({ userId, onClose }: { userId: string; onClose: () => void }
               keyboardType="decimal-pad"
             />
             <TextInput
-              style={styles.formInput}
+              style={[styles.formInput, dateError ? { borderColor: colors.error, borderWidth: 1 } : {}]}
               placeholder="Target date (YYYY-MM-DD)"
               placeholderTextColor={colors.textSecondary}
               value={addDate}
-              onChangeText={setAddDate}
+              onChangeText={(text) => {
+                setAddDate(text);
+                if (text.trim()) {
+                  const valid = /^\d{4}-\d{2}-\d{2}$/.test(text.trim()) && !isNaN(new Date(text.trim()).getTime());
+                  setDateError(valid ? '' : 'Use format YYYY-MM-DD (e.g. 2025-12-31)');
+                } else {
+                  setDateError('');
+                }
+              }}
             />
+            {dateError ? <Text style={{ color: colors.error, fontSize: 12, marginTop: -8, marginBottom: 8 }}>{dateError}</Text> : null}
             <View style={styles.formButtons}>
               <TouchableOpacity
                 style={styles.cancelButton}
@@ -718,6 +1289,7 @@ function GoalsModal({ userId, onClose }: { userId: string; onClose: () => void }
                   setAddTarget('');
                   setAddCurrent('');
                   setAddDate('');
+                  setDateError('');
                   setSelectedCategoryId(null);
                   setSelectedGoalType('saving');
                 }}
@@ -801,7 +1373,7 @@ function GoalsModal({ userId, onClose }: { userId: string; onClose: () => void }
                     />
                   </View>
                   <Text style={styles.goalProgressText}>
-                    ${current.toFixed(2)} / ${target.toFixed(2)}
+                    {currencySymbol}{current.toFixed(2)} / {currencySymbol}{target.toFixed(2)}
                   </Text>
                   {targetDateStr ? (
                     <Text style={styles.goalDate}>{targetDateStr}</Text>
@@ -1246,5 +1818,126 @@ const styles = StyleSheet.create({
   },
   goalTypeChipTextActive: {
     color: '#FFFFFF',
+  },
+  currencyItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.cardBackground,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 10,
+  },
+  currencyItemActive: {
+    borderColor: colors.primary,
+    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+  },
+  currencyItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  currencySymbol: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    width: 32,
+    textAlign: 'center',
+  },
+  currencySymbolActive: {
+    color: colors.primary,
+  },
+  currencyCode: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  currencyCodeActive: {
+    color: colors.primary,
+  },
+  currencyName: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  currencyCheck: {
+    fontSize: 18,
+    color: colors.primary,
+    fontWeight: '700',
+  },
+  editColorRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+    flexWrap: 'wrap',
+  },
+  colorCircle: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+  },
+  colorCircleSelected: {
+    borderWidth: 3,
+    borderColor: '#FFFFFF',
+  },
+  categoryRowActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  editButton: {
+    padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  editButtonText: {
+    fontSize: 18,
+  },
+  incomeBanner: {
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(16, 185, 129, 0.3)',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+  },
+  incomeBannerLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.success,
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  incomeBannerAmount: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: colors.success,
+  },
+  incomeItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.cardBackground,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+  },
+  incomeItemLeft: {
+    flex: 1,
+  },
+  incomeLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.textPrimary,
+    marginBottom: 4,
+  },
+  incomeSubLabel: {
+    fontSize: 13,
+    color: colors.textSecondary,
   },
 });

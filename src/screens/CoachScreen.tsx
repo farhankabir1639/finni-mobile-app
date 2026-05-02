@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
+import { chatAgent } from '../lib/agents';
 
 type Message = { id: string; role: 'user' | 'assistant'; content: string };
 
@@ -21,22 +22,6 @@ function getFirstName(fullName: string | null | undefined): string | null {
   return fullName.trim().split(/\s+/)[0] ?? null;
 }
 
-function getMockResponse(input: string): string {
-  const lower = input.toLowerCase();
-  if (lower.includes('budget')) {
-    return "Your budget looks good! You've used 0% of your monthly budget so far. Set a budget in Settings to start tracking.";
-  }
-  if (lower.includes('spending') || lower.includes('spent')) {
-    return "Here's your spending overview: $0 spent today, $0 this month. Connect your accounts or log expenses to see detailed breakdowns.";
-  }
-  if (lower.includes('save') || lower.includes('tips')) {
-    return "💡 Quick tips: 1) Track small purchases—they add up. 2) Set a weekly spending limit. 3) Review subscriptions monthly. Want me to analyze your spending?";
-  }
-  if (lower.includes('log') || lower.includes('expense')) {
-    return "I can help you log that! Try: 'Spent $45 on lunch' or 'Coffee $5'. I'll categorize it automatically.";
-  }
-  return "I'm here to help with your finances! Try asking about your budget, spending, or tips to save money.";
-}
 
 const QUICK_CHIPS = [
   '💰 How\'s my budget?',
@@ -66,12 +51,8 @@ export default function CoachScreen() {
       .select('name')
       .eq('id', user.id)
       .single()
-      .then(({ data }) => {
-        setFirstName(getFirstName(data?.name));
-        setProfileLoaded(true);
-      })
-      .catch(() => {
-        setFirstName(null);
+      .then(({ data, error }) => {
+        setFirstName(error ? null : getFirstName(data?.name));
         setProfileLoaded(true);
       });
   }, [user?.id]);
@@ -102,9 +83,9 @@ export default function CoachScreen() {
     return () => clearInterval(id);
   }, [isTyping]);
 
-  const sendMessage = (text: string) => {
+  const sendMessage = async (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed || !user?.id) return;
 
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -115,16 +96,24 @@ export default function CoachScreen() {
     setInputText('');
     setIsTyping(true);
 
-    setTimeout(() => {
-      const response = getMockResponse(trimmed);
+    try {
+      const { response } = await chatAgent(trimmed, user.id, [...messages, userMsg], {});
+      setIsTyping(false);
       const assistantMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: response,
       };
       setMessages((m) => [...m, assistantMsg]);
+    } catch {
       setIsTyping(false);
-    }, 800 + Math.random() * 400);
+      const assistantMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: "I'm having trouble connecting. Please try again 🔄",
+      };
+      setMessages((m) => [...m, assistantMsg]);
+    }
   };
 
   const handleChipPress = (chip: string) => {

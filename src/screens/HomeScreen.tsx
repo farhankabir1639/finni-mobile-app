@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -13,9 +14,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
+import { useProfile } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { chatAgent } from '../lib/agents';
+import { seedDefaultCategories } from '../lib/seedCategories';
 
 type Message = { id: string; role: 'user' | 'assistant'; content: string };
 
@@ -49,6 +52,7 @@ const QUICK_CHIPS = [
 export default function HomeScreen() {
   const navigation = useNavigation();
   const { user } = useAuth();
+  const { currencySymbol } = useProfile();
   const [firstName, setFirstName] = useState<string | null>(null);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -61,59 +65,87 @@ export default function HomeScreen() {
   const [chatContext, setChatContext] = useState<{
     profile?: { name?: string; currency?: string } | null;
     categories?: { id: string; name: string; emoji?: string; budget?: number; spent?: number }[] | null;
-    recentTransactions?: { withdrawal?: number; deposit?: number; description: string | null; category: string | null; date: string; type?: string }[] | null;
+    recentTransactions?: { withdrawal?: number; deposit?: number; description: string | null; category_id?: string | null; date: string; type?: string }[] | null;
     goals?: { name: string; target_amount?: number; current_amount?: number }[] | null;
   }>({});
   const scrollRef = useRef<ScrollView>(null);
   const welcomeAddedRef = useRef(false);
+  const isSendingRef = useRef(false);
 
   const fetchChatContext = useCallback(async () => {
     if (!user?.id) return;
-    const [profileRes, categoriesRes, txRes, goalsRes] = await Promise.all([
-      supabase.from('profiles').select('name, currency').eq('id', user.id).single(),
-      supabase.from('categories').select('id, name, emoji, budget, spent').eq('user_id', user.id),
-      supabase.from('transactions').select('withdrawal, deposit, description, category, date, type').eq('user_id', user.id).order('date', { ascending: false }).limit(10),
-      supabase.from('financial_goals').select('name, target_amount, current_amount').eq('user_id', user.id),
-    ]);
-    setChatContext({
-      profile: profileRes.data ? { name: profileRes.data.name, currency: profileRes.data.currency } : null,
-      categories: (categoriesRes.data as { id: string; name: string; emoji?: string; budget?: number; spent?: number }[]) ?? [],
-      recentTransactions: (txRes.data as { withdrawal?: number; deposit?: number; description: string | null; category: string | null; date: string; type?: string }[]) ?? [],
-      goals: (goalsRes.data as { name: string; target_amount?: number; current_amount?: number }[]) ?? [],
-    });
+    try {
+      const [profileRes, categoriesRes, txRes, goalsRes] = await Promise.all([
+        supabase.from('profiles').select('name, currency').eq('id', user.id).single(),
+        supabase.from('categories').select('id, name, emoji, budget, spent').eq('user_id', user.id),
+        supabase.from('transactions').select('withdrawal, deposit, description, category_id, date, type').eq('user_id', user.id).order('date', { ascending: false }).limit(10),
+        supabase.from('financial_goals').select('name, target_amount, current_amount').eq('user_id', user.id),
+      ]);
+      if (profileRes.error) console.error('[HomeScreen] Profile fetch error:', profileRes.error);
+      if (categoriesRes.error) console.error('[HomeScreen] Categories fetch error:', categoriesRes.error);
+      if (txRes.error) console.error('[HomeScreen] Transactions fetch error:', txRes.error);
+      if (goalsRes.error) console.error('[HomeScreen] Goals fetch error:', goalsRes.error);
+      setChatContext({
+        profile: profileRes.data ? { name: profileRes.data.name, currency: profileRes.data.currency } : null,
+        categories: (categoriesRes.data as { id: string; name: string; emoji?: string; budget?: number; spent?: number }[]) ?? [],
+        recentTransactions: (txRes.data as { withdrawal?: number; deposit?: number; description: string | null; category_id?: string | null; date: string; type?: string }[]) ?? [],
+        goals: (goalsRes.data as { name: string; target_amount?: number; current_amount?: number }[]) ?? [],
+      });
+    } catch (e) {
+      console.error('[HomeScreen] fetchChatContext error:', e);
+      setChatContext({});
+    }
   }, [user?.id]);
 
-  useEffect(() => {
-    fetchChatContext();
-  }, [fetchChatContext]);
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchChatContext();
+    }, [fetchChatContext])
+  );
 
   const fetchStats = useCallback(async () => {
     if (!user?.id) return;
-    const today = new Date().toISOString().slice(0, 10);
-    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
-    const { data: txData } = await supabase
-      .from('transactions')
-      .select('withdrawal, deposit, date, type')
-      .eq('user_id', user.id)
-      .gte('date', monthStart);
-    let todayTotal = 0;
-    let monthTotal = 0;
-    (txData ?? []).forEach((t) => {
-      if (t.type === 'expense') {
-        const w = Number(t.withdrawal) || 0;
-        if (t.date?.startsWith(today)) todayTotal += w;
-        monthTotal += w;
-      }
-    });
-    setTodaySpent(todayTotal);
-    const monthlyBudget = 500;
-    setMonthUsedPct(monthlyBudget > 0 ? Math.min(100, Math.round((monthTotal / monthlyBudget) * 100)) : 0);
-    setBudgetLeft(Math.max(0, monthlyBudget - monthTotal));
+    try {
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+      const [{ data: txData }, { data: catData }, { data: incomeData }] = await Promise.all([
+        supabase.from('transactions').select('withdrawal, deposit, date, type').eq('user_id', user.id).gte('date', monthStart),
+        supabase.from('categories').select('budget').eq('user_id', user.id),
+        supabase.from('income').select('amount, frequency').eq('user_id', user.id),
+      ]);
+      let todayTotal = 0;
+      let monthTotal = 0;
+      (txData ?? []).forEach((t) => {
+        if (t.type === 'expense') {
+          const w = Number(t.withdrawal) || 0;
+          if (t.date >= todayStart) todayTotal += w;
+          monthTotal += w;
+        }
+      });
+      setTodaySpent(todayTotal);
+
+      const monthlyIncome = (incomeData ?? []).reduce((sum, r) => {
+        const amt = Number(r.amount) || 0;
+        if (r.frequency === 'weekly') return sum + amt * 4.33;
+        if (r.frequency === 'annual') return sum + amt / 12;
+        return sum + amt;
+      }, 0);
+
+      const monthlyBudget = (catData ?? []).reduce((sum, c) => sum + (Number(c.budget) || 0), 0);
+      const base = monthlyIncome > 0 ? monthlyIncome : monthlyBudget;
+      setMonthUsedPct(base > 0 ? Math.min(100, Math.round((monthTotal / base) * 100)) : 0);
+      setBudgetLeft(Math.max(0, base - monthTotal));
+    } catch (e) {
+      console.error('[HomeScreen] fetchStats error:', e);
+    }
   }, [user?.id]);
 
-  useEffect(() => {
-    fetchStats();
-  }, [fetchStats]);
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchStats();
+    }, [fetchStats])
+  );
 
   const today = new Date();
   const greeting = (() => {
@@ -126,19 +158,28 @@ export default function HomeScreen() {
       setProfileLoaded(true);
       return;
     }
-    supabase
-      .from('profiles')
-      .select('name')
-      .eq('id', user.id)
-      .single()
-      .then(({ data }) => {
-        setFirstName(getFirstName(data?.name));
-        setProfileLoaded(true);
-      })
-      .catch(() => {
+    const loadProfile = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('name')
+          .eq('id', user.id)
+          .single();
+        if (error?.code === 'PGRST116') {
+          const defaultName = user.email?.split('@')[0] ?? 'User';
+          await supabase.from('profiles').upsert({ id: user.id, name: defaultName });
+          await seedDefaultCategories(user.id);
+          setFirstName(getFirstName(defaultName));
+        } else {
+          setFirstName(getFirstName(data?.name));
+        }
+      } catch {
         setFirstName(null);
+      } finally {
         setProfileLoaded(true);
-      });
+      }
+    };
+    loadProfile();
   }, [user?.id]);
 
   useEffect(() => {
@@ -169,7 +210,8 @@ export default function HomeScreen() {
 
   const handleSend = async (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed || !user?.id) return;
+    if (!trimmed || !user?.id || isSendingRef.current) return;
+    isSendingRef.current = true;
 
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -203,6 +245,8 @@ export default function HomeScreen() {
         content: "I'm having trouble connecting. Please try again 🔄",
       };
       setMessages((m) => [...m, errMsg]);
+    } finally {
+      isSendingRef.current = false;
     }
   };
 
@@ -237,7 +281,7 @@ export default function HomeScreen() {
           <View style={styles.statsRow}>
             <View style={styles.statCard}>
               <Text style={styles.statLabel}>Today</Text>
-              <Text style={styles.statValue}>${todaySpent.toFixed(2)}</Text>
+              <Text style={styles.statValue}>{currencySymbol}{todaySpent.toFixed(2)}</Text>
             </View>
             <View style={styles.statCard}>
               <Text style={styles.statLabel}>Month</Text>
@@ -245,7 +289,7 @@ export default function HomeScreen() {
             </View>
             <View style={styles.statCard}>
               <Text style={styles.statLabel}>Left</Text>
-              <Text style={styles.statValue}>${budgetLeft.toFixed(2)}</Text>
+              <Text style={styles.statValue}>{currencySymbol}{budgetLeft.toFixed(2)}</Text>
             </View>
           </View>
 

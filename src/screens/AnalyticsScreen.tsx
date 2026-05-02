@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,9 +6,15 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getCalendars } from 'expo-localization';
+import { PieChart } from 'react-native-chart-kit';
 import { useAuth } from '../contexts/AuthContext';
+import { useProfile } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import {
@@ -18,6 +24,22 @@ import {
   type DailyInsight,
   type SavingsRecommendation,
 } from '../lib/agents';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
+
+const PIE_COLORS = [
+  '#6366F1',
+  '#8B5CF6',
+  '#EC4899',
+  '#F59E0B',
+  '#10B981',
+  '#3B82F6',
+  '#EF4444',
+  '#F97316',
+  '#14B8A6',
+  '#84CC16',
+  '#6B7280',
+];
 
 type Transaction = {
   id: string;
@@ -30,6 +52,8 @@ type Transaction = {
   category_id?: string | null;
   type?: 'expense' | 'income';
 };
+
+type CategoryTotal = { name: string; amount: number };
 
 type PeriodOption = 'week' | 'month' | '3months' | 'year';
 
@@ -54,11 +78,10 @@ function getCategoryEmoji(category: string | null): string {
 }
 
 function getCategoryColor(category: string | null): string {
-  const palette = ['#6366F1', '#8B5CF6', '#EC4899', '#F59E0B', '#10B981', '#3B82F6'];
-  if (!category) return palette[0];
+  if (!category) return PIE_COLORS[0];
   let hash = 0;
   for (let i = 0; i < category.length; i++) hash = category.charCodeAt(i) + ((hash << 5) - hash);
-  return palette[Math.abs(hash) % palette.length];
+  return PIE_COLORS[Math.abs(hash) % PIE_COLORS.length];
 }
 
 function getPeriodStart(period: PeriodOption): Date {
@@ -93,41 +116,130 @@ function formatLastUpdated(date: Date | null): string {
   return `Last updated: ${diffDays} days ago`;
 }
 
+function prepareChartData(categoryTotals: CategoryTotal[]): CategoryTotal[] {
+  const sorted = [...categoryTotals].sort((a, b) => b.amount - a.amount);
+  const top10 = sorted.slice(0, 10);
+  const rest = sorted.slice(10);
+  const miscTotal = rest.reduce((sum, c) => sum + c.amount, 0);
+  if (miscTotal > 0) top10.push({ name: 'Misc', amount: miscTotal });
+  return top10;
+}
+
+function analyticsCacheKey(userId: string, date: string): string {
+  return `analytics_cache_${userId}_${date}`;
+}
+
+const INSIGHT_TYPE_CONFIG: Record<string, { color: string; icon: string }> = {
+  warning: { color: '#F59E0B', icon: '⚠️' },
+  tip: { color: '#3B82F6', icon: '💡' },
+  goal: { color: '#10B981', icon: '🎯' },
+  income_alert: { color: '#EF4444', icon: '🚨' },
+};
+
 export default function AnalyticsScreen() {
+  const navigation = useNavigation();
   const { user } = useAuth();
+  const { currencySymbol } = useProfile();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<PeriodOption>('month');
+  const [monthlyIncome, setMonthlyIncome] = useState(0);
+  const [categories, setCategories] = useState<{ id: string; name: string; emoji: string }[]>([]);
   const [insights, setInsights] = useState<DailyInsight[]>([]);
   const [savingsRecs, setSavingsRecs] = useState<SavingsRecommendation[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
+  const [showRefreshButton, setShowRefreshButton] = useState(false);
+  const [insightsError, setInsightsError] = useState('');
+  const syncAttemptedRef = useRef(false);
 
-  const runAgents = useCallback(async (forceRefresh = false) => {
-    if (!user?.id || transactions.length < 1) return;
-    if (forceRefresh) {
-      await clearAgentCache(user.id);
-      setInsights([]);
-      setSavingsRecs([]);
-    }
+  // Fetch fresh insights from Gemini, cache result with today's local-date key
+  const fetchAndCacheInsights = useCallback(async () => {
+    if (!user?.id) return;
+    const tz = getCalendars()[0]?.timeZone ?? 'UTC';
+    const localDate = new Date().toLocaleDateString('en-CA', { timeZone: tz });
+    const cacheKey = analyticsCacheKey(user.id, localDate);
+
     setInsightsLoading(true);
-    console.log('[Analytics] Calling agents...');
+    setInsightsError('');
+
     try {
-      const [dailyInsights, weeklySavings] = await Promise.all([
-        getDailyInsights(user.id, transactions),
-        getWeeklySavingsRecommendations(user.id, transactions),
+      await clearAgentCache(user.id);
+
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthTx = transactions
+        .filter((t) => new Date(t.date) >= startOfMonth)
+        .map((t) => ({ ...t, category: t.category ?? null }));
+
+      const [freshInsights, freshSavings] = await Promise.all([
+        getDailyInsights(user.id, monthTx),
+        getWeeklySavingsRecommendations(user.id, monthTx),
       ]);
-      console.log('[Analytics] Insights result:', dailyInsights);
-      console.log('[Analytics] Savings result:', weeklySavings);
-      setInsights(Array.isArray(dailyInsights) ? dailyInsights : []);
-      setSavingsRecs(Array.isArray(weeklySavings) ? weeklySavings : []);
-      setLastUpdated(new Date());
+
+      const insightsList = Array.isArray(freshInsights) ? freshInsights : [];
+      const savingsList = Array.isArray(freshSavings) ? freshSavings : [];
+      const updatedAt = new Date();
+
+      setInsights(insightsList);
+      setSavingsRecs(savingsList);
+      setLastUpdated(updatedAt);
+      setShowRefreshButton(false);
+
+      await AsyncStorage.setItem(
+        cacheKey,
+        JSON.stringify({ insights: insightsList, savings: savingsList, updatedAt: updatedAt.toISOString() })
+      );
     } catch (e) {
-      console.error('[Analytics] Agents error:', e);
+      console.error('[Analytics] Insights error:', e);
+      setInsightsError('Failed to load insights. Tap Refresh to try again.');
+      setShowRefreshButton(true);
     } finally {
       setInsightsLoading(false);
     }
   }, [user?.id, transactions]);
+
+  // On load: check today's cache → auto-fetch if transactions today → fall back to yesterday
+  const syncInsights = useCallback(async () => {
+    if (!user?.id || transactions.length < 1) return;
+
+    const tz = getCalendars()[0]?.timeZone ?? 'UTC';
+    const localDate = new Date().toLocaleDateString('en-CA', { timeZone: tz });
+    const cacheKey = analyticsCacheKey(user.id, localDate);
+
+    // 1. Today's cache exists → show it, no Refresh button
+    const cached = await AsyncStorage.getItem(cacheKey);
+    if (cached) {
+      const { insights: ci, savings: cs, updatedAt } = JSON.parse(cached);
+      setInsights(ci ?? []);
+      setSavingsRecs(cs ?? []);
+      setLastUpdated(updatedAt ? new Date(updatedAt) : null);
+      setShowRefreshButton(false);
+      return;
+    }
+
+    // 2. Has transactions logged today → auto-fetch fresh insights
+    const hasTodayTx = transactions.some(
+      (t) => new Date(t.date).toLocaleDateString('en-CA', { timeZone: tz }) === localDate
+    );
+    if (hasTodayTx) {
+      await fetchAndCacheInsights();
+      return;
+    }
+
+    // 3. No transactions today → load yesterday's cached insights + show Refresh
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayDate = yesterday.toLocaleDateString('en-CA', { timeZone: tz });
+    const yesterdayCached = await AsyncStorage.getItem(analyticsCacheKey(user.id, yesterdayDate));
+    if (yesterdayCached) {
+      const { insights: ci, savings: cs, updatedAt } = JSON.parse(yesterdayCached);
+      setInsights(ci ?? []);
+      setSavingsRecs(cs ?? []);
+      setLastUpdated(updatedAt ? new Date(updatedAt) : null);
+    }
+    setShowRefreshButton(true);
+  }, [user?.id, transactions, fetchAndCacheInsights]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -149,35 +261,53 @@ export default function AnalyticsScreen() {
           return;
         }
         setTransactions((data as Transaction[]) ?? []);
-      })
-      .catch((err) => {
-        console.warn('Analytics fetch exception:', err);
-        setLoading(false);
-        setTransactions([]);
       });
   }, [user?.id]);
 
-  const [categories, setCategories] = useState<{ id: string; name: string; emoji: string }[]>([]);
   useEffect(() => {
     if (!user?.id) return;
     supabase
       .from('categories')
       .select('id, name, emoji')
       .eq('user_id', user.id)
-      .then(({ data }) => setCategories(data ?? []));
+      .then(({ data, error }) => {
+        if (error) { setCategories([]); return; }
+        setCategories(data ?? []);
+      });
   }, [user?.id]);
 
   useEffect(() => {
-    if (transactions.length >= 1 && user?.id) {
-      runAgents(false);
+    if (!user?.id) return;
+    supabase
+      .from('income')
+      .select('amount, frequency')
+      .eq('user_id', user.id)
+      .then(({ data, error }) => {
+        if (error) return;
+        const total = (data ?? []).reduce((sum, r) => {
+          const amt = Number(r.amount) || 0;
+          if (r.frequency === 'weekly') return sum + amt * 4.33;
+          if (r.frequency === 'annual') return sum + amt / 12;
+          return sum + amt;
+        }, 0);
+        setMonthlyIncome(total);
+      });
+  }, [user?.id]);
+
+  // Run sync once after transactions are loaded — syncAttemptedRef prevents re-runs on tx updates
+  useEffect(() => {
+    if (transactions.length >= 1 && user?.id && !syncAttemptedRef.current) {
+      syncAttemptedRef.current = true;
+      syncInsights();
     }
-  }, [user?.id, transactions.length, runAgents]);
+  }, [transactions.length, user?.id, syncInsights]);
 
   const periodStart = useMemo(() => getPeriodStart(period), [period]);
 
-  const filteredTransactions = useMemo(() => {
-    return transactions.filter((t) => new Date(t.date) >= periodStart);
-  }, [transactions, periodStart]);
+  const filteredTransactions = useMemo(
+    () => transactions.filter((t) => new Date(t.date) >= periodStart),
+    [transactions, periodStart]
+  );
 
   const { totalSpent, totalSaved, byCategory, monthlyData } = useMemo(() => {
     let spent = 0;
@@ -200,7 +330,7 @@ export default function AnalyticsScreen() {
       }
     }
 
-    const byCategory = Object.entries(categoryMap)
+    const byCategory: CategoryTotal[] = Object.entries(categoryMap)
       .map(([name, amount]) => ({ name, amount }))
       .sort((a, b) => b.amount - a.amount);
 
@@ -222,7 +352,10 @@ export default function AnalyticsScreen() {
       totalSpent: spent,
       totalSaved: saved,
       byCategory,
-      monthlyData: last6Months.map((m) => ({ ...m, pct: maxMonthly > 0 ? (m.amount / maxMonthly) * 100 : 0 })),
+      monthlyData: last6Months.map((m) => ({
+        ...m,
+        pct: maxMonthly > 0 ? (m.amount / maxMonthly) * 100 : 0,
+      })),
     };
   }, [filteredTransactions, categories]);
 
@@ -243,6 +376,8 @@ export default function AnalyticsScreen() {
       </SafeAreaView>
     );
   }
+
+  const pieData = prepareChartData(byCategory);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -281,18 +416,27 @@ export default function AnalyticsScreen() {
           <View style={styles.summaryCard}>
             <Text style={styles.summaryLabel}>Total Spent</Text>
             <Text style={[styles.summaryAmount, styles.summarySpent]}>
-              ${totalSpent.toFixed(2)}
+              {currencySymbol}{totalSpent.toFixed(2)}
             </Text>
           </View>
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>Total Saved</Text>
+            <Text style={styles.summaryLabel}>
+              {monthlyIncome > 0 ? 'Monthly Income' : 'Total Saved'}
+            </Text>
             <Text style={[styles.summaryAmount, styles.summarySaved]}>
-              ${totalSaved.toFixed(2)}
+              {monthlyIncome > 0
+                ? `${currencySymbol}${(() => {
+                    if (period === 'week') return (monthlyIncome / 4.33).toFixed(2);
+                    if (period === '3months') return (monthlyIncome * 3).toFixed(2);
+                    if (period === 'year') return (monthlyIncome * 12).toFixed(2);
+                    return monthlyIncome.toFixed(2);
+                  })()}`
+                : `${currencySymbol}${totalSaved.toFixed(2)}`}
             </Text>
           </View>
         </View>
 
-        {/* Spending by Category */}
+        {/* Spending by Category — bar list */}
         <Text style={styles.sectionTitle}>Spending by Category</Text>
         <View style={styles.categorySection}>
           {byCategory.length === 0 ? (
@@ -308,7 +452,7 @@ export default function AnalyticsScreen() {
                       <View style={[styles.progressFill, { width: '0%', backgroundColor: colors.border }]} />
                     </View>
                   </View>
-                  <Text style={styles.placeholderAmount}>$0.00</Text>
+                  <Text style={styles.placeholderAmount}>{currencySymbol}0.00</Text>
                 </View>
               ))}
             </>
@@ -316,7 +460,8 @@ export default function AnalyticsScreen() {
             byCategory.map((cat) => {
               const pct = totalSpent > 0 ? (cat.amount / totalSpent) * 100 : 0;
               const catColor = getCategoryColor(cat.name);
-              const emoji = categories.find((c) => c.name === cat.name)?.emoji ?? getCategoryEmoji(cat.name);
+              const emoji =
+                categories.find((c) => c.name === cat.name)?.emoji ?? getCategoryEmoji(cat.name);
               return (
                 <View key={cat.name} style={styles.categoryRow}>
                   <View style={styles.categoryRowLeft}>
@@ -326,19 +471,54 @@ export default function AnalyticsScreen() {
                   <View style={styles.categoryRowMiddle}>
                     <View style={styles.progressTrack}>
                       <View
-                        style={[
-                          styles.progressFill,
-                          { width: `${pct}%`, backgroundColor: catColor },
-                        ]}
+                        style={[styles.progressFill, { width: `${pct}%`, backgroundColor: catColor }]}
                       />
                     </View>
                   </View>
-                  <Text style={styles.categoryAmount}>${cat.amount.toFixed(2)}</Text>
+                  <Text style={styles.categoryAmount}>
+                    {currencySymbol}{cat.amount.toFixed(2)}
+                  </Text>
                 </View>
               );
             })
           )}
         </View>
+
+        {/* Spending Distribution — pie chart */}
+        {byCategory.length >= 2 ? (
+          <>
+            <Text style={styles.sectionTitle}>Spending Distribution</Text>
+            <View style={styles.pieSection}>
+              <PieChart
+                data={pieData.map((cat, i) => ({
+                  name: cat.name.length > 13 ? cat.name.slice(0, 13) + '…' : cat.name,
+                  population: cat.amount,
+                  color: PIE_COLORS[i % PIE_COLORS.length],
+                  legendFontColor: '#94A3B8',
+                  legendFontSize: 11,
+                }))}
+                width={SCREEN_WIDTH - 40}
+                height={200}
+                chartConfig={{
+                  color: (opacity = 1) => `rgba(148, 163, 184, ${opacity})`,
+                }}
+                accessor="population"
+                backgroundColor="transparent"
+                paddingLeft="10"
+                absolute={false}
+              />
+            </View>
+          </>
+        ) : byCategory.length === 1 ? (
+          <>
+            <Text style={styles.sectionTitle}>Spending Distribution</Text>
+            <View style={styles.pieEmptyState}>
+              <Text style={styles.pieEmptyText}>
+                Add transactions in more categories to see the distribution chart
+              </Text>
+            </View>
+          </>
+        ) : null}
 
         {/* Monthly Trend */}
         <Text style={styles.sectionTitle}>Monthly Trend</Text>
@@ -350,7 +530,10 @@ export default function AnalyticsScreen() {
                   <View
                     style={[
                       styles.barFill,
-                      { height: `${m.pct}%`, backgroundColor: m.pct > 0 ? colors.primary : colors.border },
+                      {
+                        height: `${m.pct}%`,
+                        backgroundColor: m.pct > 0 ? colors.primary : colors.border,
+                      },
                     ]}
                   />
                 </View>
@@ -360,25 +543,32 @@ export default function AnalyticsScreen() {
           </View>
         </View>
 
-        {/* AI Insights section - only when user has transactions */}
+        {/* AI Insights */}
         {transactions.length >= 1 && (
           <>
             <View style={styles.aiInsightsHeader}>
               <Text style={styles.sectionTitle}>AI Insights</Text>
-              <TouchableOpacity
-                style={styles.refreshButton}
-                onPress={() => runAgents(true)}
-                disabled={insightsLoading}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.refreshButtonText}>
-                  {insightsLoading ? 'Refreshing...' : 'Refresh'}
-                </Text>
-              </TouchableOpacity>
+              {showRefreshButton && (
+                <TouchableOpacity
+                  style={styles.refreshButton}
+                  onPress={fetchAndCacheInsights}
+                  disabled={insightsLoading}
+                  activeOpacity={0.8}
+                >
+                  {insightsLoading ? (
+                    <ActivityIndicator size="small" color="#6366F1" />
+                  ) : (
+                    <Text style={styles.refreshButtonText}>Refresh</Text>
+                  )}
+                </TouchableOpacity>
+              )}
             </View>
             {lastUpdated && (
               <Text style={styles.lastUpdatedText}>{formatLastUpdated(lastUpdated)}</Text>
             )}
+            {insightsError ? (
+              <Text style={styles.insightsError}>{insightsError}</Text>
+            ) : null}
             <View style={styles.aiInsightsSection}>
               {insightsLoading && insights.length === 0 ? (
                 <View style={styles.aiInsightCard}>
@@ -389,17 +579,37 @@ export default function AnalyticsScreen() {
                 </View>
               ) : (
                 <>
-                  {insights.map((insight, i) => (
-                    <View key={i} style={styles.aiInsightCard}>
-                      <Text style={styles.aiInsightTitle}>📊 {insight.summary || 'Insight'}</Text>
-                      <Text style={styles.aiInsightSubtitle}>
-                        {insight.suggestion || insight.topCategory || '—'}
-                      </Text>
-                    </View>
-                  ))}
+                  {insights.map((insight, i) => {
+                    const insightType = insight.type ?? 'tip';
+                    const typeConfig = INSIGHT_TYPE_CONFIG[insightType] ?? INSIGHT_TYPE_CONFIG.tip;
+                    const title = insight.title || insight.summary || 'Insight';
+                    const description = insight.description || insight.suggestion || insight.topCategory || '—';
+                    return (
+                      <View
+                        key={i}
+                        style={[styles.aiInsightCard, { borderColor: typeConfig.color }]}
+                      >
+                        <Text style={[styles.aiInsightTitle, { color: typeConfig.color }]}>
+                          {typeConfig.icon} {title}
+                        </Text>
+                        <Text style={styles.aiInsightSubtitle}>{description}</Text>
+                        {insightType === 'income_alert' && (
+                          <TouchableOpacity
+                            style={[styles.insightCTA, { borderColor: typeConfig.color }]}
+                            onPress={() => navigation.navigate('Settings' as never)}
+                            activeOpacity={0.8}
+                          >
+                            <Text style={[styles.insightCTAText, { color: typeConfig.color }]}>
+                              💡 Add income sources →
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    );
+                  })}
                   {savingsRecs.map((rec, i) => (
-                    <View key={`savings-${i}`} style={styles.aiInsightCard}>
-                      <Text style={styles.aiInsightTitle}>💰 {rec.title}</Text>
+                    <View key={`savings-${i}`} style={[styles.aiInsightCard, { borderColor: '#3B82F6' }]}>
+                      <Text style={[styles.aiInsightTitle, { color: '#3B82F6' }]}>💰 {rec.title}</Text>
                       <Text style={styles.aiInsightSubtitle}>{rec.description}</Text>
                       {rec.potentialSavings && (
                         <Text style={styles.potentialSavings}>{rec.potentialSavings}</Text>
@@ -591,6 +801,30 @@ const styles = StyleSheet.create({
     width: 60,
     textAlign: 'right',
   },
+  pieSection: {
+    backgroundColor: colors.cardBackground,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    overflow: 'hidden',
+    paddingVertical: 8,
+    marginBottom: 24,
+  },
+  pieEmptyState: {
+    backgroundColor: colors.cardBackground,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 28,
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  pieEmptyText: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
   monthlySection: {
     backgroundColor: colors.cardBackground,
     borderWidth: 1,
@@ -642,6 +876,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(99, 102, 241, 0.2)',
     borderWidth: 1,
     borderColor: '#6366F1',
+    minWidth: 80,
+    alignItems: 'center',
   },
   refreshButtonText: {
     fontSize: 13,
@@ -651,7 +887,12 @@ const styles = StyleSheet.create({
   lastUpdatedText: {
     fontSize: 12,
     color: colors.textSecondary,
-    marginBottom: 12,
+    marginBottom: 8,
+  },
+  insightsError: {
+    fontSize: 13,
+    color: colors.error,
+    marginBottom: 10,
   },
   aiInsightsSection: {
     gap: 12,
@@ -680,16 +921,16 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginBottom: 8,
   },
-  comingSoonBadge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+  insightCTA: {
+    marginTop: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderWidth: 1,
     borderRadius: 8,
-    backgroundColor: 'rgba(99, 102, 241, 0.2)',
+    alignSelf: 'flex-start',
   },
-  comingSoonText: {
-    fontSize: 12,
+  insightCTAText: {
+    fontSize: 13,
     fontWeight: '600',
-    color: '#6366F1',
   },
 });

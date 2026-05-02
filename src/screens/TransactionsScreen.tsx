@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
+import { useProfile } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 
@@ -21,12 +22,10 @@ type Transaction = {
   withdrawal?: number;
   deposit?: number;
   description: string | null;
-  category: string | null;
   category_id?: string | null;
   type?: 'expense' | 'income';
+  categories?: { id: string; name: string; emoji?: string } | null;
 };
-
-type CategoryRow = { id: string; name: string; emoji?: string };
 
 type FilterOption = 'all' | 'today' | 'week' | 'month';
 
@@ -80,9 +79,9 @@ function formatTime(dateStr: string): string {
   });
 }
 
-function formatAmount(amount: number, isExpense: boolean): string {
+function formatAmount(amount: number, isExpense: boolean, currencySymbol: string): string {
   const abs = Math.abs(amount);
-  return `${isExpense ? '-' : '+'}$${abs.toFixed(2)}`;
+  return `${isExpense ? '-' : '+'}${currencySymbol}${abs.toFixed(2)}`;
 }
 
 function getStartOfDay(d: Date): Date {
@@ -109,8 +108,8 @@ function getStartOfMonth(d: Date): Date {
 
 export default function TransactionsScreen() {
   const { user } = useAuth();
+  const { currencySymbol } = useProfile();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [categoriesData, setCategoriesData] = useState<CategoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterOption>('all');
@@ -119,33 +118,29 @@ export default function TransactionsScreen() {
     if (!user?.id) {
       setLoading(false);
       setTransactions([]);
-      setCategoriesData([]);
       return;
     }
     setLoading(true);
-    Promise.all([
-      supabase.from('transactions').select('*').eq('user_id', user.id).order('date', { ascending: false }),
-      supabase.from('categories').select('id, name, emoji').eq('user_id', user.id),
-    ])
-      .then(([txRes, catRes]) => {
+    supabase
+      .from('transactions')
+      .select(`
+        *,
+        categories (
+          id,
+          name,
+          emoji
+        )
+      `)
+      .eq('user_id', user.id)
+      .order('date', { ascending: false })
+      .then(({ data, error }) => {
         setLoading(false);
-        if (txRes.error) {
-          console.warn('Transactions fetch error:', txRes.error);
+        if (error) {
+          console.warn('Transactions fetch error:', error);
           setTransactions([]);
         } else {
-          setTransactions((txRes.data as Transaction[]) ?? []);
+          setTransactions((data as Transaction[]) ?? []);
         }
-        if (catRes.error) {
-          console.warn('Categories fetch error:', catRes.error);
-          setCategoriesData([]);
-        } else {
-          setCategoriesData((catRes.data as CategoryRow[]) ?? []);
-        }
-      })
-      .catch((err) => {
-        console.warn('Transactions fetch exception:', err);
-        setLoading(false);
-        setTransactions([]);
       });
   }, [user?.id]);
 
@@ -163,8 +158,7 @@ export default function TransactionsScreen() {
 
     let list = transactions.filter((t) => {
       const desc = (t.description ?? '').toLowerCase();
-      const cat = categoriesData?.find((c) => c.id === t.category_id)?.name ?? (t.category ?? '');
-      const catLower = (cat ?? '').toLowerCase();
+      const catLower = (t.categories?.name ?? '').toLowerCase();
       const q = searchQuery.toLowerCase().trim();
       if (q && !desc.includes(q) && !catLower.includes(q)) return false;
 
@@ -195,7 +189,7 @@ export default function TransactionsScreen() {
       }
     }
     return groups;
-  }, [transactions, categoriesData, searchQuery, filter]);
+  }, [transactions, searchQuery, filter]);
 
   const summary = useMemo(() => {
     let spent = 0;
@@ -220,10 +214,10 @@ export default function TransactionsScreen() {
     const amt = t.type === 'expense' ? (Number(t.withdrawal) || 0) : (Number(t.deposit) || 0);
     const isExpense = t.type === 'expense';
     const name = t.description ?? 'Transaction';
-    const cat = categoriesData?.find((c) => c.id === t.category_id);
+    const cat = t.categories ?? null;
     const categoryLabel = cat ? `${cat.emoji ?? '💰'} ${cat.name}` : 'Uncategorized';
-    const emoji = cat?.emoji ?? getCategoryEmoji(cat?.name ?? t.category);
-    const circleColor = getCategoryColor(cat?.name ?? t.category);
+    const emoji = cat?.emoji ?? getCategoryEmoji(cat?.name ?? null);
+    const circleColor = getCategoryColor(cat?.name ?? null);
 
     return (
       <View key={t.id} style={styles.transactionItem}>
@@ -240,7 +234,7 @@ export default function TransactionsScreen() {
           </View>
         </View>
         <Text style={[styles.transactionAmount, isExpense ? styles.amountExpense : styles.amountIncome]}>
-          {formatAmount(amt, isExpense)}
+          {formatAmount(amt, isExpense, currencySymbol)}
         </Text>
       </View>
     );
@@ -307,13 +301,13 @@ export default function TransactionsScreen() {
           <View style={styles.summaryCard}>
             <Text style={styles.summaryLabel}>Total Spent</Text>
             <Text style={[styles.summaryAmount, styles.summarySpent]}>
-              ${summary.spent.toFixed(2)}
+              {currencySymbol}{summary.spent.toFixed(2)}
             </Text>
           </View>
           <View style={styles.summaryCard}>
             <Text style={styles.summaryLabel}>Total Income</Text>
             <Text style={[styles.summaryAmount, styles.summaryIncome]}>
-              ${summary.income.toFixed(2)}
+              {currencySymbol}{summary.income.toFixed(2)}
             </Text>
           </View>
         </View>
