@@ -17,6 +17,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfile, CURRENCIES } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
+import { clearAgentCache } from '../lib/agents';
 import { colors } from '../lib/theme';
 
 type Category = {
@@ -234,6 +235,7 @@ export default function SettingsScreen() {
 type BudgetPeriod = 'daily' | 'weekly' | 'monthly';
 
 function CategoriesModal({ userId, onClose }: { userId: string; onClose: () => void }) {
+  const { currencySymbol } = useProfile();
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -588,11 +590,11 @@ function CategoriesModal({ userId, onClose }: { userId: string; onClose: () => v
                     <Text style={styles.categoryName}>{cat.name}</Text>
                     <View style={styles.categoryAmounts}>
                       <Text style={styles.categoryBudget}>
-                        Budget: ${(cat.budget ?? 0).toFixed(2)}
+                        Budget: {currencySymbol}{(cat.budget ?? 0).toFixed(2)}
                         {cat.type ? ` / ${cat.type}` : ''}
                       </Text>
                       <Text style={styles.categorySpent}>
-                        Spent: ${(cat.spent ?? 0).toFixed(2)}
+                        Spent: {currencySymbol}{(cat.spent ?? 0).toFixed(2)}
                       </Text>
                     </View>
                   </View>
@@ -661,10 +663,10 @@ function EditProfileModal({
   const handleSave = async () => {
     if (!userId) return;
     setSaving(true);
-    const payload: Record<string, unknown> = { id: userId, name: name.trim(), location: location.trim() };
+    const payload: Record<string, unknown> = { name: name.trim(), location: location.trim() };
     const budget = parseFloat(monthlyBudget);
     if (!isNaN(budget) && budget >= 0) payload.monthly_budget = budget;
-    const { error } = await supabase.from('profiles').upsert(payload);
+    const { error } = await supabase.from('profiles').update(payload).eq('id', userId);
     setSaving(false);
     if (error) {
       Alert.alert('Error', `Could not save profile: ${error.message}`);
@@ -739,12 +741,15 @@ function CurrencyModal({
     setSaving(true);
     const { error } = await supabase
       .from('profiles')
-      .upsert({ id: userId, currency: selected });
+      .update({ currency: selected })
+      .eq('id', userId);
     setSaving(false);
     if (error) {
       Alert.alert('Error', `Could not save currency: ${error.message}`);
       return;
     }
+    // Bust cached AI insights so the next Analytics visit regenerates them with the new currency
+    await clearAgentCache(userId).catch(() => {});
     await onSave();
   };
 
@@ -1104,8 +1109,10 @@ function GoalsModal({ userId, onClose }: { userId: string; onClose: () => void }
     if (!targetAmount) return;
     if (dateError) return;
     setSaving(true);
+    // Append T12:00:00 so the date is parsed as local noon, not UTC midnight.
+    // Without this, "2027-02-01" parses as UTC 00:00 which displays as Jan 31 in UTC-x zones.
     const targetDateVal = targetDate
-      ? new Date(targetDate).toISOString()
+      ? new Date(`${targetDate}T12:00:00`).toISOString()
       : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
     const payload = {
       user_id: userId,
@@ -1126,6 +1133,8 @@ function GoalsModal({ userId, onClose }: { userId: string; onClose: () => void }
       Alert.alert('Error', JSON.stringify(error));
       return;
     }
+    // Bust cached AI insights so the new goal is reflected on next Analytics visit
+    clearAgentCache(userId).catch(() => {});
     Alert.alert('Success', 'Goal saved!');
     setAddName('');
     setAddTarget('');
@@ -1139,7 +1148,11 @@ function GoalsModal({ userId, onClose }: { userId: string; onClose: () => void }
   };
 
   const handleDeleteGoal = async (id: string) => {
-    const { error } = await supabase.from('financial_goals').delete().eq('id', id);
+    const { error } = await supabase
+      .from('financial_goals')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId);
     if (error) {
       console.warn('Goal delete error:', error);
       return;

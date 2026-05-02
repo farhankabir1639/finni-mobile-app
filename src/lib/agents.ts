@@ -1,6 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: '$', BDT: '৳', EUR: '€', GBP: '£', AUD: 'A$', CAD: 'C$', SGD: 'S$', INR: '₹',
+};
+function getCurrencySymbol(code?: string | null): string {
+  return CURRENCY_SYMBOLS[code ?? 'USD'] ?? code ?? '$';
+}
+
 const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
 const GEMINI_MODEL = 'gemini-2.5-flash-lite';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
@@ -91,7 +98,7 @@ Input: ${input}`;
     const parsed = JSON.parse(cleaned) as ParsedTransaction;
     if (parsed && typeof parsed.amount === 'number' && parsed.description) {
       return {
-        response: `Parsed: ${parsed.description} - $${Math.abs(parsed.amount).toFixed(2)}`,
+        response: `Parsed: ${parsed.description} - ${Math.abs(parsed.amount).toFixed(2)}`,
         transaction: parsed,
       };
     }
@@ -263,10 +270,36 @@ export async function getWeeklySavingsRecommendations(
     amount: t.type === 'expense' ? (Number(t.withdrawal) || 0) : (Number(t.deposit) || 0),
   }));
 
+  // Fetch profile for currency and location context
+  const profileRes = await supabase
+    .from('profiles')
+    .select('currency, location, name')
+    .eq('id', userId)
+    .maybeSingle();
+  const profile = profileRes.data as { currency?: string; location?: string; name?: string } | null;
+  const currency = profile?.currency ?? 'USD';
+  const location = profile?.location ?? '';
+  const name = profile?.name ?? 'User';
+
   try {
-    const prompt = `Based on these transactions, suggest 3 practical ways to save money. Return a JSON array: [{ "title": "...", "description": "...", "potentialSavings": "..." }]. No markdown.
-Totals: totalSpent=$${totalSpent.toFixed(2)}, totalIncome=$${totalIncome.toFixed(2)}
-Transactions: ${JSON.stringify(normalized)}`;
+    const prompt = `You are Finni, a personal AI finance coach. Suggest 3 highly practical, specific ways for this user to save money based on their spending patterns.
+
+USER PROFILE:
+- Name: ${name}
+- Currency: ${currency}
+${location ? `- Location: ${location}` : ''}
+
+SPENDING SUMMARY:
+- Total Spent: ${currency} ${totalSpent.toFixed(2)}
+- Total Income Logged: ${currency} ${totalIncome.toFixed(2)}
+
+RECENT TRANSACTIONS:
+${JSON.stringify(normalized)}
+
+Return ONLY a valid JSON array (no markdown):
+[{ "title": "...", "description": "...", "potentialSavings": "..." }]
+Use ${currency} for all amounts. Be specific to the user's actual spending patterns.`;
+
     const text = await callGemini(prompt);
     const cleaned = text.replace(/```json?|```/g, '').trim();
     let localizedResults: SavingsRecommendation[];
@@ -493,10 +526,11 @@ Current user message: ${userMessage}`;
     }
 
     // Fallback if Gemini returns empty response after stripping TRANSACTION_DATA
+    const sym = getCurrencySymbol(profile?.currency);
     const finalResponse =
       response.trim() ||
       (txData
-        ? `✅ Logged $${Math.abs(Number(txData.amount)).toFixed(2)} under ${categories?.find((c) => c.id === txData.category_id)?.name ?? 'expenses'}.`
+        ? `✅ Logged ${sym}${Math.abs(Number(txData.amount)).toFixed(2)} under ${categories?.find((c) => c.id === txData.category_id)?.name ?? 'expenses'}.`
         : "I couldn't process that. Please try again.");
 
     // Bug 1 fix: Detect standalone category creation (no TRANSACTION_DATA or NEW_CATEGORY tags)

@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCalendars } from 'expo-localization';
 import { PieChart } from 'react-native-chart-kit';
@@ -241,60 +242,50 @@ export default function AnalyticsScreen() {
     setShowRefreshButton(true);
   }, [user?.id, transactions, fetchAndCacheInsights]);
 
-  useEffect(() => {
+  const fetchAll = useCallback(async () => {
     if (!user?.id) {
       setLoading(false);
       setTransactions([]);
       return;
     }
     setLoading(true);
-    supabase
-      .from('transactions')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('date', { ascending: false })
-      .then(({ data, error }) => {
-        setLoading(false);
-        if (error) {
-          console.warn('Analytics fetch error:', error);
-          setTransactions([]);
-          return;
-        }
-        setTransactions((data as Transaction[]) ?? []);
-      });
+    syncAttemptedRef.current = false;
+
+    const [txRes, catRes, incomeRes] = await Promise.all([
+      supabase.from('transactions').select('*').eq('user_id', user.id).order('date', { ascending: false }),
+      supabase.from('categories').select('id, name, emoji').eq('user_id', user.id),
+      supabase.from('income').select('amount, frequency').eq('user_id', user.id),
+    ]);
+
+    setLoading(false);
+
+    if (txRes.error) {
+      console.warn('[Analytics] Transactions fetch error:', txRes.error);
+      setTransactions([]);
+    } else {
+      setTransactions((txRes.data as Transaction[]) ?? []);
+    }
+
+    if (!catRes.error) setCategories(catRes.data ?? []);
+
+    if (!incomeRes.error) {
+      const total = (incomeRes.data ?? []).reduce((sum, r) => {
+        const amt = Number(r.amount) || 0;
+        if (r.frequency === 'weekly') return sum + amt * 4.33;
+        if (r.frequency === 'annual') return sum + amt / 12;
+        return sum + amt;
+      }, 0);
+      setMonthlyIncome(total);
+    }
   }, [user?.id]);
 
-  useEffect(() => {
-    if (!user?.id) return;
-    supabase
-      .from('categories')
-      .select('id, name, emoji')
-      .eq('user_id', user.id)
-      .then(({ data, error }) => {
-        if (error) { setCategories([]); return; }
-        setCategories(data ?? []);
-      });
-  }, [user?.id]);
+  useFocusEffect(
+    useCallback(() => {
+      fetchAll();
+    }, [fetchAll])
+  );
 
-  useEffect(() => {
-    if (!user?.id) return;
-    supabase
-      .from('income')
-      .select('amount, frequency')
-      .eq('user_id', user.id)
-      .then(({ data, error }) => {
-        if (error) return;
-        const total = (data ?? []).reduce((sum, r) => {
-          const amt = Number(r.amount) || 0;
-          if (r.frequency === 'weekly') return sum + amt * 4.33;
-          if (r.frequency === 'annual') return sum + amt / 12;
-          return sum + amt;
-        }, 0);
-        setMonthlyIncome(total);
-      });
-  }, [user?.id]);
-
-  // Run sync once after transactions are loaded — syncAttemptedRef prevents re-runs on tx updates
+  // Run sync once per focus after transactions are loaded
   useEffect(() => {
     if (transactions.length >= 1 && user?.id && !syncAttemptedRef.current) {
       syncAttemptedRef.current = true;

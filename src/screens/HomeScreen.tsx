@@ -109,9 +109,9 @@ export default function HomeScreen() {
       const now = new Date();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-      const [{ data: txData }, { data: catData }, { data: incomeData }] = await Promise.all([
+      const [{ data: txData }, { data: profileData }, { data: incomeData }] = await Promise.all([
         supabase.from('transactions').select('withdrawal, deposit, date, type').eq('user_id', user.id).gte('date', monthStart),
-        supabase.from('categories').select('budget').eq('user_id', user.id),
+        supabase.from('profiles').select('monthly_budget').eq('id', user.id).maybeSingle(),
         supabase.from('income').select('amount, frequency').eq('user_id', user.id),
       ]);
       let todayTotal = 0;
@@ -132,8 +132,9 @@ export default function HomeScreen() {
         return sum + amt;
       }, 0);
 
-      const monthlyBudget = (catData ?? []).reduce((sum, c) => sum + (Number(c.budget) || 0), 0);
-      const base = monthlyIncome > 0 ? monthlyIncome : monthlyBudget;
+      // Priority: income > profile monthly_budget > 0
+      const profileBudget = Number((profileData as any)?.monthly_budget) || 0;
+      const base = monthlyIncome > 0 ? monthlyIncome : profileBudget;
       setMonthUsedPct(base > 0 ? Math.min(100, Math.round((monthTotal / base) * 100)) : 0);
       setBudgetLeft(Math.max(0, base - monthTotal));
     } catch (e) {

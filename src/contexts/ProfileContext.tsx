@@ -24,6 +24,8 @@ export function getCurrencySymbol(code: string): string {
 type ProfileData = {
   name: string | null;
   currency: string;
+  location: string | null;
+  monthlyBudget: number;
   onboardingComplete: boolean;
 };
 
@@ -34,7 +36,13 @@ type ProfileContextType = {
   refreshProfile: () => Promise<void>;
 };
 
-const defaultProfile: ProfileData = { name: null, currency: 'USD', onboardingComplete: false };
+const defaultProfile: ProfileData = {
+  name: null,
+  currency: 'USD',
+  location: null,
+  monthlyBudget: 0,
+  onboardingComplete: false,
+};
 
 const ProfileContext = createContext<ProfileContextType>({
   profile: defaultProfile,
@@ -57,13 +65,15 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     try {
       const { data } = await supabase
         .from('profiles')
-        .select('name, currency, onboarding_complete')
+        .select('name, currency, location, monthly_budget, onboarding_complete')
         .eq('id', user.id)
         .maybeSingle();
       if (data) {
         setProfile({
-          name: data.name ?? null,
-          currency: data.currency ?? 'USD',
+          name: (data as any).name ?? null,
+          currency: (data as any).currency ?? 'USD',
+          location: (data as any).location ?? null,
+          monthlyBudget: Number((data as any).monthly_budget) || 0,
           onboardingComplete: (data as any).onboarding_complete ?? true,
         });
       } else {

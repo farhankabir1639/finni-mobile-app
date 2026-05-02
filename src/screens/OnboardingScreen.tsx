@@ -144,24 +144,38 @@ export default function OnboardingScreen() {
     }
   };
 
+  // Map onboarding card types to the valid DB enum values used in financial_goals
+  const GOAL_TYPE_MAP: Record<string, string> = {
+    saving: 'saving',
+    home: 'saving',
+    education: 'saving',
+    travel: 'saving',
+    debt_payment: 'debt_payment',
+    custom: 'saving',
+  };
+
   const saveStep3 = async () => {
     if (!user?.id || !selectedGoal || !goalName.trim()) return;
     const targetAmt = parseFloat(targetAmount);
     const targetDate =
       deadline.trim() && /^\d{4}-\d{2}-\d{2}$/.test(deadline)
-        ? new Date(deadline).toISOString()
+        ? new Date(`${deadline.trim()}T12:00:00`).toISOString()
         : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
-    await supabase.from('financial_goals').insert({
+    const { error } = await supabase.from('financial_goals').insert({
       user_id: user.id,
       name: goalName.trim(),
       target_amount: isNaN(targetAmt) ? 1000 : targetAmt,
       current_amount: 0,
       target_date: targetDate,
-      goal_type: selectedGoal.type,
+      goal_type: GOAL_TYPE_MAP[selectedGoal.type] ?? 'saving',
       status: 'in_progress',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     });
+    if (error) {
+      console.error('[Onboarding] Goal insert error:', error);
+      throw error;
+    }
   };
 
   const handleContinue = async () => {

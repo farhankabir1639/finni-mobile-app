@@ -95,15 +95,18 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
               <Text style={styles.buttonText}>Sign In</Text>
             )}
           </TouchableOpacity>
-        </View>
 
-        <TouchableOpacity
-          style={styles.linkContainer}
-          onPress={() => navigation.navigate('Signup')}
-        >
-          <Text style={styles.linkText}>Don't have an account? </Text>
-          <Text style={styles.linkHighlight}>Sign Up</Text>
-        </TouchableOpacity>
+          <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 16 }}>
+            <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
+              Don't have an account?{' '}
+            </Text>
+            <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
+              <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '500' }}>
+                Sign Up
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -196,20 +199,5 @@ const styles = StyleSheet.create({
     color: colors.error,
     fontSize: 14,
     paddingHorizontal: 4,
-  },
-  linkContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: 32,
-    alignItems: 'center',
-  },
-  linkText: {
-    color: colors.textSecondary,
-    fontSize: 15,
-  },
-  linkHighlight: {
-    color: colors.primary,
-    fontSize: 15,
-    fontWeight: '600',
   },
 });
