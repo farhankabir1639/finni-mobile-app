@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/Administrator/AppData/Local/Android/Sdk/platform-tools/**)",
+      "Read(//mnt/c/Users/Administrator/AppData/Local/Android/Sdk/**)",
+      "Read(//mnt/**)"
+    ]
+  }
+}
