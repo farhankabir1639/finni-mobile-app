@@ -24,6 +24,10 @@
       }
     },
     "production": {
+      "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      },
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://ntsisizkaitqdtcuchpk.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im50c2lzaXprYWl0cWR0Y3VjaHBrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc5NTczOTIsImV4cCI6MjA2MzUzMzM5Mn0.ueLeLdLfVpC3N72fjJ4EDlQwv6K9okzRXjRhhkjnKoM",

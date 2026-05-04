@@ -6,7 +6,10 @@
       "Bash(grep -n \"prepareChartData\\\\|PIE_COLORS\\\\|miscTotal\\\\|top10\\\\|byCategory.length\\\\|\\\\\\\\.slice\\(0, 10\\)\" c:/Users/Administrator/finni-mobile-app/src/screens/AnalyticsScreen.tsx)",
       "Bash(grep -n \"currencySymbol\\\\|\\\\$0\\\\|\\\\\\\\\\\\$\" c:/Users/Administrator/finni-mobile-app/src/screens/AnalyticsScreen.tsx)",
       "Bash(adb logcat *)",
-      "Bash(/mnt/c/Users/Administrator/AppData/Local/Android/Sdk/platform-tools/adb.exe devices *)"
+      "Bash(/mnt/c/Users/Administrator/AppData/Local/Android/Sdk/platform-tools/adb.exe devices *)",
+      "Bash(xargs wc *)",
+      "Bash(ls -la node_modules/.cache)",
+      "Bash(ls -la .expo)"
     ]
   }
 }
