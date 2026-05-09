@@ -42,15 +42,7 @@
       "supportEmail": "support@heyfinni.com"
     },
     "plugins": [
-      "expo-localization",
-      [
-        "@sentry/react-native",
-        {
-          "url": "https://sentry.io/",
-          "project": "finni",
-          "organization": "finni-vb"
-        }
-      ]
+      "expo-localization"
     ]
   }
 }
