@@ -90,7 +90,7 @@ export default function HomeScreen() {
     if (!user?.id) return;
     try {
       const [profileRes, categoriesRes, txRes, goalsRes] = await Promise.all([
-        supabase.from('profiles').select('name, currency').eq('id', user.id).single(),
+        supabase.from('profiles').select('name, currency').eq('id', user.id).maybeSingle(),
         supabase.from('categories').select('id, name, emoji, budget, spent').eq('user_id', user.id),
         supabase.from('transactions').select('withdrawal, deposit, description, category_id, date, type').eq('user_id', user.id).order('date', { ascending: false }).limit(10),
         supabase.from('financial_goals').select('name, target_amount, current_amount').eq('user_id', user.id),
@@ -177,7 +177,7 @@ export default function HomeScreen() {
           .from('profiles')
           .select('name')
           .eq('id', user.id)
-          .single();
+          .maybeSingle();
         if (error?.code === 'PGRST116') {
           const defaultName = user.email?.split('@')[0] ?? 'User';
           await supabase.from('profiles').upsert({ id: user.id, name: defaultName });

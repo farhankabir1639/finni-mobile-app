@@ -153,6 +153,7 @@ export default function AnalyticsScreen() {
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [showRefreshButton, setShowRefreshButton] = useState(false);
   const [insightsError, setInsightsError] = useState('');
+  const [refreshCooldown, setRefreshCooldown] = useState(false);
   const [userInsightPrompt, setUserInsightPrompt] = useState('');
   const [promptDraft, setPromptDraft] = useState('');
   const [showPromptEditor, setShowPromptEditor] = useState(false);
@@ -209,6 +210,8 @@ export default function AnalyticsScreen() {
       setSavingsRecs(savingsList);
       setLastUpdated(updatedAt);
       setShowRefreshButton(false);
+      setRefreshCooldown(true);
+      setTimeout(() => setRefreshCooldown(false), 5 * 60 * 1000);
 
       await AsyncStorage.setItem(
         cacheKey,
@@ -565,6 +568,13 @@ export default function AnalyticsScreen() {
           </View>
         </View>
 
+        {/* Financial disclaimer */}
+        <View style={styles.disclaimer}>
+          <Text style={styles.disclaimerText}>
+            ⚠️ AI insights are for informational purposes only and do not constitute financial advice. Consult a qualified professional before making financial decisions.
+          </Text>
+        </View>
+
         {/* AI Insights */}
         {transactions.length < 50 ? (
           <View style={[styles.aiInsightCard, { borderColor: colors.border }]}>
@@ -590,15 +600,15 @@ export default function AnalyticsScreen() {
                 </TouchableOpacity>
                 {showRefreshButton && (
                   <TouchableOpacity
-                    style={styles.refreshButton}
+                    style={[styles.refreshButton, (insightsLoading || refreshCooldown) && { opacity: 0.5 }]}
                     onPress={fetchAndCacheInsights}
-                    disabled={insightsLoading}
+                    disabled={insightsLoading || refreshCooldown}
                     activeOpacity={0.8}
                   >
                     {insightsLoading ? (
                       <ActivityIndicator size="small" color="#6366F1" />
                     ) : (
-                      <Text style={styles.refreshButtonText}>Refresh</Text>
+                      <Text style={styles.refreshButtonText}>{refreshCooldown ? 'Wait 5 min' : 'Refresh'}</Text>
                     )}
                   </TouchableOpacity>
                 )}
@@ -1052,5 +1062,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: colors.textPrimary,
+  },
+  disclaimer: {
+    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.25)',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+  },
+  disclaimerText: {
+    fontSize: 11,
+    color: '#94A3B8',
+    lineHeight: 16,
   },
 });

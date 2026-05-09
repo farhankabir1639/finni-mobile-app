@@ -795,7 +795,7 @@ Current user message: ${userMessage}`;
       }
     }
 
-    if (txData && typeof txData.amount === 'number' && (txData.type === 'expense' || txData.type === 'income')) {
+    if (txData && typeof txData.amount === 'number' && txData.amount > 0 && txData.amount < 1_000_000 && (txData.type === 'expense' || txData.type === 'income')) {
       let categoryId = typeof txData.category_id === 'string' ? txData.category_id : null;
       let matchingScore = 0;
 

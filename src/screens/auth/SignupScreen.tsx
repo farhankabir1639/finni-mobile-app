@@ -9,9 +9,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Linking,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { colors } from '../../lib/theme';
+
+const PRIVACY_URL = 'https://www.heyfinni.com/privacy-policy';
+const DATA_DELETION_URL = 'https://www.heyfinni.com/data-deletion';
 
 type SignupScreenProps = {
   navigation: { navigate: (name: string) => void };
@@ -176,6 +180,18 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
           <Text style={styles.linkText}>Already have an account? </Text>
           <Text style={styles.linkHighlight}>Sign In</Text>
         </TouchableOpacity>
+
+        <View style={styles.legalNote}>
+          <Text style={styles.legalText}>By creating an account you agree to our </Text>
+          <TouchableOpacity onPress={() => Linking.openURL(PRIVACY_URL)}>
+            <Text style={styles.legalLink}>Privacy Policy</Text>
+          </TouchableOpacity>
+          <Text style={styles.legalText}>. You can request </Text>
+          <TouchableOpacity onPress={() => Linking.openURL(DATA_DELETION_URL)}>
+            <Text style={styles.legalLink}>data deletion</Text>
+          </TouchableOpacity>
+          <Text style={styles.legalText}> at any time.</Text>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -304,5 +320,24 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: 15,
     fontWeight: '600',
+  },
+  legalNote: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    marginTop: 20,
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+  },
+  legalText: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
+  legalLink: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    textDecorationLine: 'underline',
+    lineHeight: 18,
   },
 });

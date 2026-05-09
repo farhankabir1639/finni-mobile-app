@@ -4,6 +4,7 @@
     "slug": "heyfinni",
     "owner": "heyfinniai",
     "version": "1.0.0",
+    "description": "AI-powered personal finance assistant. Track expenses, manage budgets, and reach your financial goals.",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -15,11 +16,11 @@
     "ios": {
       "supportsTablet": true
     },
-    "scheme": "finni",
+    "scheme": "finni-app",
     "newArchEnabled": true,
     "android": {
       "package": "com.farhankabir1111.finni",
-      "versionCode": 1,
+      "versionCode": 2,
       "adaptiveIcon": {
         "backgroundColor": "#0A0F1E",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -31,7 +32,10 @@
     "extra": {
       "eas": {
         "projectId": "e321e1be-455d-404c-95a9-aa6c02be4bd6"
-      }
+      },
+      "privacyPolicyUrl": "https://www.heyfinni.com/privacy-policy",
+      "dataDeletionUrl": "https://www.heyfinni.com/data-deletion",
+      "supportEmail": "support@heyfinni.com"
     },
     "plugins": [
       "expo-localization"

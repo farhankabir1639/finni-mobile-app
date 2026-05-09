@@ -9,9 +9,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Linking,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { colors } from '../../lib/theme';
+
+const PRIVACY_URL = 'https://www.heyfinni.com/privacy-policy';
+const DATA_DELETION_URL = 'https://www.heyfinni.com/data-deletion';
 
 type LoginScreenProps = {
   navigation: { navigate: (name: string) => void };
@@ -107,6 +111,16 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
             </TouchableOpacity>
           </View>
         </View>
+
+        <View style={styles.legalRow}>
+          <TouchableOpacity onPress={() => Linking.openURL(PRIVACY_URL)}>
+            <Text style={styles.legalLink}>Privacy Policy</Text>
+          </TouchableOpacity>
+          <Text style={styles.legalSep}>·</Text>
+          <TouchableOpacity onPress={() => Linking.openURL(DATA_DELETION_URL)}>
+            <Text style={styles.legalLink}>Data Deletion</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -199,5 +213,22 @@ const styles = StyleSheet.create({
     color: colors.error,
     fontSize: 14,
     paddingHorizontal: 4,
+  },
+  legalRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 32,
+    paddingBottom: 8,
+  },
+  legalLink: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    textDecorationLine: 'underline',
+  },
+  legalSep: {
+    fontSize: 12,
+    color: colors.textSecondary,
   },
 });
