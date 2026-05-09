@@ -21,7 +21,10 @@
     "android": {
       "package": "com.farhankabir1111.finni",
       "versionCode": 2,
-      "permissions": ["android.permission.INTERNET", "android.permission.ACCESS_NETWORK_STATE"],
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#0A0F1E",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -39,7 +42,15 @@
       "supportEmail": "support@heyfinni.com"
     },
     "plugins": [
-      "expo-localization"
+      "expo-localization",
+      [
+        "@sentry/react-native",
+        {
+          "url": "https://sentry.io/",
+          "project": "finni",
+          "organization": "heyfinniai"
+        }
+      ]
     ]
   }
 }

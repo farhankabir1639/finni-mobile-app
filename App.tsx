@@ -3,10 +3,14 @@ import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
+import * as Sentry from '@sentry/react-native';
 import { AuthProvider } from './src/contexts/AuthContext';
 import { ProfileProvider } from './src/contexts/ProfileContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import { colors } from './src/lib/theme';
+import { initSentry } from './src/lib/sentry';
+
+initSentry();
 
 type ErrorBoundaryState = { hasError: boolean; message: string };
 
@@ -25,6 +29,7 @@ class ErrorBoundary extends React.Component<
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error('[ErrorBoundary] Uncaught error:', error, info.componentStack);
+    Sentry.captureException(error, { extra: { componentStack: info.componentStack } });
   }
 
   render() {
@@ -69,7 +74,7 @@ const errorStyles = StyleSheet.create({
   buttonText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
 });
 
-export default function App() {
+function App() {
   return (
     <GestureHandlerRootView style={styles.container}>
       <ErrorBoundary>
@@ -92,3 +97,5 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
 });
+
+export default Sentry.wrap(App);

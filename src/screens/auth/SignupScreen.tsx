@@ -10,6 +10,7 @@ import {
   Platform,
   ScrollView,
   Linking,
+  Image,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { colors } from '../../lib/theme';
@@ -92,9 +93,11 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.logoContainer}>
-          <View style={styles.logoCircle}>
-            <Text style={styles.logoText}>F</Text>
-          </View>
+          <Image
+            source={require('../../../assets/logo-white.png')}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
         </View>
 
         <Text style={styles.title}>Welcome to Finni</Text>
@@ -212,23 +215,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 24,
   },
-  logoCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    elevation: 8,
-  },
-  logoText: {
-    fontSize: 40,
-    fontWeight: '700',
-    color: colors.textPrimary,
+  logoImage: {
+    width: 160,
+    height: 88,
   },
   title: {
     fontSize: 28,

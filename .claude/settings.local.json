@@ -3,7 +3,17 @@
     "allow": [
       "Read(//c/Users/Administrator/AppData/Local/Android/Sdk/platform-tools/**)",
       "Read(//mnt/c/Users/Administrator/AppData/Local/Android/Sdk/**)",
-      "Read(//mnt/**)"
+      "Read(//mnt/**)",
+      "Bash(git commit -m ' *)",
+      "Bash(eas credentials *)",
+      "Bash(eas build:list --platform android --limit 3 --json)",
+      "Bash(python -c \"import sys,json; builds=json.load\\(sys.stdin\\); [print\\(b.get\\('id'\\), b.get\\('status'\\), b.get\\('createdAt',''\\)[:10]\\) for b in builds]\")",
+      "Bash(eas build:list --platform android --limit 3)",
+      "Bash(eas build:inspect --id de183a98-d4cd-4bbd-9df1-d39fa8309340)",
+      "Bash(eas build:resign --help)",
+      "Bash(eas fetch:android:keystore)",
+      "Bash(python -c \"from PIL import Image; print\\('PIL OK'\\)\")",
+      "Bash(pip install *)"
     ]
   }
 }

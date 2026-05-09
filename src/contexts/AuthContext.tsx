@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { setSentryUser, clearSentryUser } from '../lib/sentry';
 
 const hasSupabaseConfig = !!(
   process.env.EXPO_PUBLIC_SUPABASE_URL &&
@@ -36,6 +37,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
+      if (session?.user?.id) setSentryUser(session.user.id);
+      else clearSentryUser();
     });
 
     return () => subscription.unsubscribe();

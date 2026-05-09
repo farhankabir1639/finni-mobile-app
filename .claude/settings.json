@@ -9,7 +9,9 @@
       "Bash(/mnt/c/Users/Administrator/AppData/Local/Android/Sdk/platform-tools/adb.exe devices *)",
       "Bash(xargs wc *)",
       "Bash(ls -la node_modules/.cache)",
-      "Bash(ls -la .expo)"
+      "Bash(ls -la .expo)",
+      "Read(//c/Users/Administrator/.claude/projects/c--Users-Administrator-finni-mobile-app/**)",
+      "Bash(git add *)"
     ]
   }
 }
