@@ -289,6 +289,7 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
+    marginRight: 8,
   },
   categoryEmoji: {
     fontSize: 24,
@@ -301,8 +302,8 @@ export const styles = StyleSheet.create({
     marginBottom: 4,
   },
   categoryAmounts: {
-    flexDirection: 'row',
-    gap: 16,
+    flexDirection: 'column',
+    gap: 2,
   },
   categoryBudget: {
     fontSize: 14,

@@ -25,33 +25,27 @@ export default function EditProfileModal({
   onSave: () => Promise<void>;
 }) {
   const [name, setName] = useState(currentName ?? '');
-  const [monthlyBudget, setMonthlyBudget] = useState('');
-  const [location, setLocation] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!userId) return;
     supabase
       .from('profiles')
-      .select('name, monthly_budget, location')
+      .select('name')
       .eq('id', userId)
       .maybeSingle()
       .then(({ data }) => {
-        if (data) {
-          setName((data as any).name ?? '');
-          setMonthlyBudget(String((data as any).monthly_budget ?? '') || '');
-          setLocation((data as any).location ?? '');
-        }
+        if (data) setName((data as any).name ?? '');
       });
   }, [userId]);
 
   const handleSave = async () => {
     if (!userId) return;
     setSaving(true);
-    const payload: Record<string, unknown> = { name: name.trim(), location: location.trim() };
-    const budget = parseFloat(monthlyBudget);
-    if (!isNaN(budget) && budget >= 0) payload.monthly_budget = budget;
-    const { error } = await supabase.from('profiles').update(payload).eq('id', userId);
+    const { error } = await supabase
+      .from('profiles')
+      .update({ name: name.trim() })
+      .eq('id', userId);
     setSaving(false);
     if (error) {
       Alert.alert('Error', `Could not save profile: ${error.message}`);
@@ -71,12 +65,17 @@ export default function EditProfileModal({
       </View>
       <ScrollView style={styles.modalScroll} contentContainerStyle={[styles.modalScrollContent, { paddingTop: 24 }]}>
         <Text style={styles.formLabel}>Display Name</Text>
-        <TextInput style={styles.formInput} placeholder="Your name" placeholderTextColor={colors.textSecondary} value={name} onChangeText={setName} />
-        <Text style={styles.formLabel}>Location</Text>
-        <TextInput style={styles.formInput} placeholder="e.g. Dhaka, Bangladesh" placeholderTextColor={colors.textSecondary} value={location} onChangeText={setLocation} />
-        <Text style={styles.formLabel}>Monthly Budget</Text>
-        <TextInput style={styles.formInput} placeholder="e.g. 1500" placeholderTextColor={colors.textSecondary} value={monthlyBudget} onChangeText={setMonthlyBudget} keyboardType="decimal-pad" />
-        <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={saving}>
+        <TextInput
+          style={styles.formInput}
+          placeholder="Your name"
+          placeholderTextColor={colors.textSecondary}
+          value={name}
+          onChangeText={setName}
+        />
+        <Text style={[styles.formLabel, { color: colors.textSecondary, fontSize: 12, marginTop: 8 }]}>
+          Monthly budget is calculated automatically from your income in Settings → Income.
+        </Text>
+        <TouchableOpacity style={[styles.saveButton, { marginTop: 24 }]} onPress={handleSave} disabled={saving}>
           {saving ? <ActivityIndicator size="small" color={colors.textPrimary} /> : <Text style={styles.saveButtonText}>Save Changes</Text>}
         </TouchableOpacity>
       </ScrollView>

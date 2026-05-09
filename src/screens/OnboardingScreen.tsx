@@ -12,19 +12,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
-import { useProfile } from '../contexts/ProfileContext';
+import { useProfile, CURRENCIES } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { seedDefaultCategories } from '../lib/seedCategories';
 
-const ONBOARDING_CURRENCIES = [
-  { code: 'USD', symbol: '$' },
-  { code: 'BDT', symbol: '৳' },
-  { code: 'EUR', symbol: '€' },
-  { code: 'GBP', symbol: '£' },
-  { code: 'INR', symbol: '₹' },
-  { code: 'AUD', symbol: 'A$' },
-];
 
 const GOAL_CARDS = [
   { type: 'saving', label: 'Save money', emoji: '💰' },
@@ -44,6 +36,8 @@ function suggestCurrency(location: string): string {
   if (loc.includes('uk') || loc.includes('united kingdom') || loc.includes('london') || loc.includes('england')) return 'GBP';
   if (loc.includes('euro') || loc.includes('germany') || loc.includes('france') || loc.includes('spain') || loc.includes('italy')) return 'EUR';
   if (loc.includes('australia') || loc.includes('sydney') || loc.includes('melbourne')) return 'AUD';
+  if (loc.includes('canada') || loc.includes('toronto') || loc.includes('vancouver') || loc.includes('montreal')) return 'CAD';
+  if (loc.includes('singapore')) return 'SGD';
   return 'USD';
 }
 
@@ -78,6 +72,9 @@ export default function OnboardingScreen() {
   const [targetAmount, setTargetAmount] = useState('');
   const [deadline, setDeadline] = useState('');
 
+  // Completion screen fallback
+  const [showFallback, setShowFallback] = useState(false);
+
   // Auto-suggest currency from location
   useEffect(() => {
     if (location.trim()) setCurrency(suggestCurrency(location));
@@ -97,7 +94,14 @@ export default function OnboardingScreen() {
     else setGoalName('');
   }, [selectedGoal]);
 
-  const currencySymbol = ONBOARDING_CURRENCIES.find((c) => c.code === currency)?.symbol ?? '$';
+  // Show fallback "Get Started" button if auto-navigation hasn't fired after 3s
+  useEffect(() => {
+    if (step !== 3) return;
+    const timer = setTimeout(() => setShowFallback(true), 3000);
+    return () => clearTimeout(timer);
+  }, [step]);
+
+  const currencySymbol = CURRENCIES.find((c) => c.code === currency)?.symbol ?? '$';
 
   const animateIn = (direction: 'forward' | 'back') => {
     slideAnim.setValue(direction === 'forward' ? 350 : -350);
@@ -121,18 +125,22 @@ export default function OnboardingScreen() {
 
   const saveStep1 = async () => {
     if (!user?.id) return;
-    const payload: Record<string, unknown> = { id: user.id, currency };
+    const now = new Date().toISOString();
+    const payload: Record<string, unknown> = {
+      id: user.id,
+      currency,
+      created_at: now,
+      updated_at: now,
+    };
     if (name.trim()) payload.name = name.trim();
-    if (location.trim()) payload.location = location.trim();
-    await supabase.from('profiles').upsert(payload);
+    const { error } = await supabase.from('profiles').upsert(payload);
+    if (error) console.error('[Onboarding] saveStep1 error:', error);
   };
 
   const saveStep2 = async () => {
     if (!user?.id) return;
     const incomeAmt = parseFloat(incomeAmount);
-    const budgetAmt = parseFloat(budget);
     const profilePayload: Record<string, unknown> = { id: user.id };
-    if (!isNaN(budgetAmt) && budgetAmt > 0) profilePayload.monthly_budget = budgetAmt;
     if (Object.keys(profilePayload).length > 1) await supabase.from('profiles').upsert(profilePayload);
     if (!isNaN(incomeAmt) && incomeAmt > 0) {
       await supabase.from('income').insert({
@@ -169,8 +177,6 @@ export default function OnboardingScreen() {
       target_date: targetDate,
       goal_type: GOAL_TYPE_MAP[selectedGoal.type] ?? 'saving',
       status: 'in_progress',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
     });
     if (error) {
       console.error('[Onboarding] Goal insert error:', error);
@@ -194,30 +200,46 @@ export default function OnboardingScreen() {
 
   const handleSkip = () => advance();
 
+  const completeOnboarding = React.useCallback(async () => {
+    console.log('[Onboarding] Step 1: completeOnboarding called');
+    console.log('[Onboarding] Step 2: userId =', user?.id);
+    if (!user?.id) return;
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .upsert({ id: user.id, onboarding_complete: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: 'id' });
+      console.log('[Onboarding] Step 3: DB upsert error =', error);
+      if (error) {
+        console.log('[Onboarding] Step 4: FAILED - DB error');
+        return;
+      }
+      console.log('[Onboarding] Step 5: DB upsert SUCCESS');
+      seedDefaultCategories(user.id).catch((e) =>
+        console.error('[Onboarding] Seed categories error (non-fatal):', e)
+      );
+      console.log('[Onboarding] Step 6: calling refreshProfile...');
+      await refreshProfile();
+      console.log('[Onboarding] Step 7: refreshProfile done');
+    } catch (e) {
+      console.log('[Onboarding] EXCEPTION:', e);
+    }
+  }, [user?.id, refreshProfile]);
+
   // Completion: mark onboarding done first, then seed categories (non-blocking)
   useEffect(() => {
     if (step !== 3 || !user?.id) return;
-    let cancelled = false;
+    let mounted = true;
     (async () => {
       try {
-        // Mark complete first — this is what gates the navigation.
-        // If this succeeds, user is unblocked even if seed fails.
-        await supabase
-          .from('profiles')
-          .update({ onboarding_complete: true })
-          .eq('id', user.id);
-        // Seed categories in the background; failure is non-fatal.
-        seedDefaultCategories(user.id).catch((e) =>
-          console.error('[Onboarding] Seed categories error (non-fatal):', e)
-        );
+        await completeOnboarding();
       } catch (e) {
         console.error('[Onboarding] Complete error:', e);
       } finally {
-        if (!cancelled) await refreshProfile();
+        if (mounted) console.log('[Onboarding] completeOnboarding done');
       }
     })();
-    return () => { cancelled = true; };
-  }, [step, user?.id, refreshProfile]);
+    return () => { mounted = false; };
+  }, [step, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Completion screen ---
   if (step === 3) {
@@ -232,6 +254,15 @@ export default function OnboardingScreen() {
             You're all set{firstName ? `, ${firstName}` : ''}! 🚀
           </Text>
           <Text style={styles.completionSubtitle}>Let's start your financial journey.</Text>
+          {showFallback && (
+            <TouchableOpacity
+              style={styles.ctaButton}
+              onPress={() => completeOnboarding()}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.ctaText}>Get Started →</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </SafeAreaView>
     );
@@ -286,7 +317,7 @@ export default function OnboardingScreen() {
             {/* ── Step 1: Who are you? ── */}
             {step === 0 && (
               <View style={styles.stepContent}>
-                <Text style={styles.fieldLabel}>What's your name?</Text>
+                <Text style={styles.fieldLabel}>What's your name? <Text style={{ color: colors.error }}>*</Text></Text>
                 <TextInput
                   style={styles.input}
                   placeholder="Your name"
@@ -296,7 +327,7 @@ export default function OnboardingScreen() {
                   autoCapitalize="words"
                 />
 
-                <Text style={styles.fieldLabel}>Where are you based?</Text>
+                <Text style={styles.fieldLabel}>Where are you based? <Text style={{ color: colors.error }}>*</Text></Text>
                 <TextInput
                   style={styles.input}
                   placeholder="City, Country (e.g. Dhaka, Bangladesh)"
@@ -307,7 +338,7 @@ export default function OnboardingScreen() {
 
                 <Text style={styles.fieldLabel}>What currency do you use?</Text>
                 <View style={styles.pillRow}>
-                  {ONBOARDING_CURRENCIES.map((c) => (
+                  {CURRENCIES.map((c) => (
                     <TouchableOpacity
                       key={c.code}
                       style={[styles.pill, currency === c.code && styles.pillActive]}
@@ -328,7 +359,7 @@ export default function OnboardingScreen() {
               <View style={styles.stepContent}>
                 <Text style={styles.fieldLabel}>
                   What's your monthly income?{' '}
-                  <Text style={styles.optional}>(optional)</Text>
+                  <Text style={{ color: colors.error }}>*</Text>
                 </Text>
                 <View style={styles.inputWithPrefix}>
                   <Text style={styles.inputPrefix}>{currencySymbol}</Text>
@@ -437,23 +468,32 @@ export default function OnboardingScreen() {
         </ScrollView>
 
         {/* Bottom actions */}
-        <View style={styles.bottomActions}>
-          <TouchableOpacity
-            style={[styles.ctaButton, isSaving && styles.ctaDisabled]}
-            onPress={handleContinue}
-            disabled={isSaving}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.ctaText}>
-              {isSaving ? 'Saving...' : step === 2 ? 'Set Goal & Finish' : 'Continue →'}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleSkip} style={styles.skipButton}>
-            <Text style={styles.skipText}>
-              {step === 2 ? 'Set goals later' : 'Skip for now'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+        {(() => {
+          const step0Valid = name.trim().length > 0 && location.trim().length > 0;
+          const step1Valid = parseFloat(incomeAmount) > 0;
+          const ctaBlocked =
+            (step === 0 && !step0Valid) ||
+            (step === 1 && !step1Valid);
+          return (
+            <View style={styles.bottomActions}>
+              <TouchableOpacity
+                style={[styles.ctaButton, (isSaving || ctaBlocked) && styles.ctaDisabled]}
+                onPress={handleContinue}
+                disabled={isSaving || ctaBlocked}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.ctaText}>
+                  {isSaving ? 'Saving...' : step === 2 ? 'Set Goal & Finish' : 'Continue →'}
+                </Text>
+              </TouchableOpacity>
+              {step === 2 && (
+                <TouchableOpacity onPress={handleSkip} style={styles.skipButton}>
+                  <Text style={styles.skipText}>Set goals later</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          );
+        })()}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

@@ -85,9 +85,17 @@ export default function IncomeModal({ userId, onClose }: { userId: string; onClo
   };
 
   const handleDelete = async (id: string) => {
-    const { error } = await supabase.from('income').delete().eq('id', id);
-    if (error) { console.warn('[Income] Delete error:', error); return; }
-    setIncomeRecords((r) => r.filter((x) => x.id !== id));
+    Alert.alert('Delete Income', 'Remove this income source?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: async () => {
+          const { error } = await supabase.from('income').delete().eq('id', id).eq('user_id', userId);
+          if (error) { console.warn('[Income] Delete error:', error); return; }
+          setIncomeRecords((r) => r.filter((x) => x.id !== id));
+        },
+      },
+    ]);
   };
 
   const freqSuffix = (f: string) => {

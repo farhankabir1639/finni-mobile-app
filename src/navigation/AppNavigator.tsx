@@ -16,6 +16,10 @@ export default function AppNavigator() {
   const { user, loading: authLoading } = useAuth();
   const { profile, profileLoading } = useProfile();
 
+  console.log('[AppNavigator] rendering, onboardingComplete =', profile?.onboardingComplete);
+  console.log('[AppNavigator] profileLoading =', profileLoading);
+  console.log('[AppNavigator] user =', !!user);
+
   if (authLoading || (user && profileLoading)) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }}>

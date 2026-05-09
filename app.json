@@ -1,7 +1,8 @@
 {
   "expo": {
-    "name": "finni",
-    "slug": "finni",
+    "name": "Finni",
+    "slug": "heyfinni",
+    "owner": "heyfinniai",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -17,7 +18,7 @@
     "scheme": "finni",
     "newArchEnabled": true,
     "android": {
-      "package": "com.finni.app",
+      "package": "com.farhankabir1111.finni",
       "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#0A0F1E",
@@ -29,7 +30,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "75db960b-eb7e-4d0b-9bf3-72c5393b8e54"
+        "projectId": "e321e1be-455d-404c-95a9-aa6c02be4bd6"
       }
     },
     "plugins": [

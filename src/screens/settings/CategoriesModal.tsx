@@ -31,7 +31,10 @@ export default function CategoriesModal({ userId, onClose }: { userId: string; o
   const [editName, setEditName] = useState('');
   const [editEmoji, setEditEmoji] = useState('');
   const [editColor, setEditColor] = useState('#6366F1');
+  const [editBudget, setEditBudget] = useState('');
+  const [editBudgetType, setEditBudgetType] = useState<BudgetPeriod>('monthly');
   const [updating, setUpdating] = useState(false);
+  const [autoAssigning, setAutoAssigning] = useState(false);
 
   const EDIT_COLOR_PALETTE = ['#6366F1', '#8B5CF6', '#EC4899', '#F59E0B', '#10B981', '#3B82F6', '#EF4444', '#F97316'];
 
@@ -62,7 +65,7 @@ export default function CategoriesModal({ userId, onClose }: { userId: string; o
     setLoading(true);
 
     const subscription = supabase
-      .channel('categories-changes')
+      .channel(`categories-changes-${userId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'categories', filter: `user_id=eq.${userId}` },
@@ -91,7 +94,6 @@ export default function CategoriesModal({ userId, onClose }: { userId: string; o
     if (!name || !userId) return;
     setSaving(true);
 
-    const budgetPeriod = addBudgetType === 'daily' ? 'Daily' : addBudgetType === 'weekly' ? 'Weekly' : 'Monthly';
     const payload = {
       user_id: userId,
       name,
@@ -99,7 +101,7 @@ export default function CategoriesModal({ userId, onClose }: { userId: string; o
       color: '#6366F1',
       spent: 0,
       budget: budgetAmount,
-      type: budgetPeriod.toLowerCase(),
+      type: addBudgetType,
     };
     console.log('[Categories] Insert payload:', payload);
 
@@ -128,9 +130,16 @@ export default function CategoriesModal({ userId, onClose }: { userId: string; o
       return;
     }
     setUpdating(true);
+    const budgetVal = parseFloat(editBudget);
     const { error } = await supabase
       .from('categories')
-      .update({ name, emoji: editEmoji.trim() || '💰', color: editColor })
+      .update({
+        name,
+        emoji: editEmoji.trim() || '💰',
+        color: editColor,
+        budget: isNaN(budgetVal) ? 0 : budgetVal,
+        type: editBudgetType,
+      })
       .eq('id', editingCategory.id)
       .eq('user_id', userId);
     setUpdating(false);
@@ -139,6 +148,47 @@ export default function CategoriesModal({ userId, onClose }: { userId: string; o
       return;
     }
     setEditingCategory(null);
+    fetchCategories();
+  };
+
+  const handleAutoAssignBudgets = () => {
+    Alert.alert(
+      '✨ AI Budget',
+      'This will automatically set a monthly budget for each category based on your income and past spending patterns.\n\nYour current budgets will be overwritten. You can always edit them manually afterwards.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Apply', onPress: runAutoAssign },
+      ]
+    );
+  };
+
+  const runAutoAssign = async () => {
+    if (!userId || categories.length === 0) return;
+    setAutoAssigning(true);
+    const { data: incomeData } = await supabase.from('income').select('amount, frequency').eq('user_id', userId);
+    const monthlyIncome = (incomeData ?? []).reduce((sum, r) => {
+      const amt = Number(r.amount) || 0;
+      if (r.frequency === 'weekly') return sum + amt * 4.33;
+      if (r.frequency === 'annual') return sum + amt / 12;
+      return sum + amt;
+    }, 0);
+
+    if (monthlyIncome === 0) {
+      Alert.alert('No Income', 'Add an income source first so budgets can be calculated.');
+      setAutoAssigning(false);
+      return;
+    }
+
+    const totalSpent = categories.reduce((sum, c) => sum + (c.spent ?? 0), 0);
+    const updates = categories.map((cat) => {
+      const share = totalSpent > 0 ? (cat.spent ?? 0) / totalSpent : 1 / categories.length;
+      const budget = Math.round(monthlyIncome * share * 100) / 100;
+      return supabase.from('categories').update({ budget, type: 'monthly' }).eq('id', cat.id).eq('user_id', userId);
+    });
+
+    await Promise.all(updates);
+    setAutoAssigning(false);
+    Alert.alert('Done', 'Budgets assigned based on your spending patterns and monthly income.');
     fetchCategories();
   };
 
@@ -179,17 +229,31 @@ export default function CategoriesModal({ userId, onClose }: { userId: string; o
       >
         <View style={styles.modalHeader}>
           <Text style={styles.modalHeaderTitle}>Categories</Text>
-          <View style={styles.modalHeaderRight}>
-            {!showAddForm && !editingCategory && (
-              <TouchableOpacity style={styles.addButton} onPress={() => setShowAddForm(true)} activeOpacity={0.8}>
-                <Text style={styles.addButtonText}>Add Category</Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.closeButton}>
-              <Text style={styles.closeButtonText}>✕</Text>
+          <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.closeButton}>
+            <Text style={styles.closeButtonText}>✕</Text>
+          </TouchableOpacity>
+        </View>
+        {!showAddForm && !editingCategory && (
+          <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingBottom: 12 }}>
+            <TouchableOpacity
+              style={[styles.addButton, { flex: 1, alignItems: 'center' }]}
+              onPress={handleAutoAssignBudgets}
+              activeOpacity={0.8}
+              disabled={autoAssigning}
+            >
+              {autoAssigning
+                ? <ActivityIndicator size="small" color={colors.textPrimary} />
+                : <Text style={styles.addButtonText}>✨ AI Budget</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.addButton, { flex: 1, alignItems: 'center' }]}
+              onPress={() => setShowAddForm(true)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.addButtonText}>Add Category</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        )}
 
         {showAddForm ? (
           <View style={styles.addForm}>
@@ -223,6 +287,18 @@ export default function CategoriesModal({ userId, onClose }: { userId: string; o
             <Text style={styles.formLabel}>Edit Category</Text>
             <TextInput style={styles.formInput} placeholder="Category name" placeholderTextColor={colors.textSecondary} value={editName} onChangeText={setEditName} />
             <TextInput style={styles.formInput} placeholder="Emoji (e.g. 🍔)" placeholderTextColor={colors.textSecondary} value={editEmoji} onChangeText={setEditEmoji} />
+            <TextInput style={styles.formInput} placeholder="Monthly budget (e.g. 500)" placeholderTextColor={colors.textSecondary} value={editBudget} onChangeText={setEditBudget} keyboardType="decimal-pad" />
+            <Text style={styles.formLabel}>Budget period</Text>
+            <View style={styles.periodChipsRow}>
+              {(['daily', 'weekly', 'monthly'] as const).map((opt) => {
+                const active = editBudgetType === opt;
+                return (
+                  <TouchableOpacity key={opt} style={[styles.periodChip, active && styles.periodChipActive]} onPress={() => setEditBudgetType(opt)} activeOpacity={0.8}>
+                    <Text style={[styles.periodChipText, active && styles.periodChipTextActive]}>{opt.charAt(0).toUpperCase() + opt.slice(1)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
             <Text style={styles.formLabel}>Color</Text>
             <View style={styles.editColorRow}>
               {EDIT_COLOR_PALETTE.map((c) => (
@@ -265,7 +341,7 @@ export default function CategoriesModal({ userId, onClose }: { userId: string; o
                   </View>
                 </View>
                 <View style={styles.categoryRowActions}>
-                  <TouchableOpacity onPress={() => { setEditingCategory(cat); setEditName(cat.name); setEditEmoji(cat.emoji || '💰'); setEditColor(cat.color || '#6366F1'); setShowAddForm(false); }} style={styles.editButton}>
+                  <TouchableOpacity onPress={() => { setEditingCategory(cat); setEditName(cat.name); setEditEmoji(cat.emoji || '💰'); setEditColor(cat.color || '#6366F1'); setEditBudget(cat.budget ? String(cat.budget) : ''); setEditBudgetType((cat.type as BudgetPeriod) || 'monthly'); setShowAddForm(false); }} style={styles.editButton}>
                     <Text style={styles.editButtonText}>✏️</Text>
                   </TouchableOpacity>
                   <TouchableOpacity onPress={() => handleDeleteCategory(cat.id)} style={styles.deleteButton}>

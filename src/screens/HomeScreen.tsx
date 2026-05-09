@@ -10,6 +10,7 @@ import {
   Pressable,
   KeyboardAvoidingView,
   Platform,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -19,8 +20,18 @@ import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { chatAgent } from '../lib/agents';
 import { seedDefaultCategories } from '../lib/seedCategories';
+import {
+  loadTodaySession,
+  saveSession,
+  loadAllSessions,
+  formatSessionDate,
+  formatMessageTime,
+  todayDateStr,
+  type SessionMessage,
+  type ChatSession,
+} from '../lib/chatSessions';
 
-type Message = { id: string; role: 'user' | 'assistant'; content: string };
+type Message = { id: string; role: 'user' | 'assistant'; content: string; timestamp?: string };
 
 function getGreetingBase(): string {
   const hour = new Date().getHours();
@@ -68,6 +79,9 @@ export default function HomeScreen() {
     recentTransactions?: { withdrawal?: number; deposit?: number; description: string | null; category_id?: string | null; date: string; type?: string }[] | null;
     goals?: { name: string; target_amount?: number; current_amount?: number }[] | null;
   }>({});
+  const [showHistory, setShowHistory] = useState(false);
+  const [historySessions, setHistorySessions] = useState<ChatSession[]>([]);
+  const [activeSessionDate, setActiveSessionDate] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const welcomeAddedRef = useRef(false);
   const isSendingRef = useRef(false);
@@ -111,7 +125,7 @@ export default function HomeScreen() {
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
       const [{ data: txData }, { data: profileData }, { data: incomeData }] = await Promise.all([
         supabase.from('transactions').select('withdrawal, deposit, date, type').eq('user_id', user.id).gte('date', monthStart),
-        supabase.from('profiles').select('monthly_budget').eq('id', user.id).maybeSingle(),
+        Promise.resolve({ data: null }),
         supabase.from('income').select('amount, frequency').eq('user_id', user.id),
       ]);
       let todayTotal = 0;
@@ -132,9 +146,7 @@ export default function HomeScreen() {
         return sum + amt;
       }, 0);
 
-      // Priority: income > profile monthly_budget > 0
-      const profileBudget = Number((profileData as any)?.monthly_budget) || 0;
-      const base = monthlyIncome > 0 ? monthlyIncome : profileBudget;
+      const base = monthlyIncome;
       setMonthUsedPct(base > 0 ? Math.min(100, Math.round((monthTotal / base) * 100)) : 0);
       setBudgetLeft(Math.max(0, base - monthTotal));
     } catch (e) {
@@ -184,18 +196,24 @@ export default function HomeScreen() {
   }, [user?.id]);
 
   useEffect(() => {
-    if (!welcomeAddedRef.current && profileLoaded) {
+    if (!welcomeAddedRef.current && profileLoaded && user?.id) {
       welcomeAddedRef.current = true;
       const name = firstName ?? 'there';
-      setMessages([
-        {
-          id: 'welcome',
-          role: 'assistant',
-          content: `Hi ${name}! 👋 I'm Finni. Ask me anything about your finances or just say 'spent $X on Y' to log expenses`,
-        },
-      ]);
+      loadTodaySession(user.id).then((saved) => {
+        if (saved && saved.length > 0) {
+          setMessages(saved as Message[]);
+        } else {
+          setMessages([
+            {
+              id: 'welcome',
+              role: 'assistant',
+              content: `Hi ${name}! 👋 I'm Finni. Ask me anything about your finances or just say 'spent $X on Y' to log expenses`,
+            },
+          ]);
+        }
+      });
     }
-  }, [profileLoaded, firstName]);
+  }, [profileLoaded, firstName, user?.id]);
 
   useEffect(() => {
     scrollRef.current?.scrollToEnd({ animated: true });
@@ -214,25 +232,32 @@ export default function HomeScreen() {
     if (!trimmed || !user?.id || isSendingRef.current) return;
     isSendingRef.current = true;
 
+    const now = new Date().toISOString();
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
       content: trimmed,
+      timestamp: now,
     };
     setMessages((m) => [...m, userMsg]);
     setInputText('');
     setIsTyping(true);
 
+    const sessionDate = activeSessionDate ?? undefined;
+
     try {
-      const { response, transaction } = await chatAgent(trimmed, user.id, [...messages, userMsg], chatContext);
+      const { response, transaction } = await chatAgent(trimmed, user.id, [...messages, userMsg], chatContext, sessionDate);
       setIsTyping(false);
 
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: response,
+        timestamp: new Date().toISOString(),
       };
-      setMessages((m) => [...m, aiMsg]);
+      const updatedMessages = [...messages, userMsg, aiMsg];
+      setMessages(updatedMessages);
+      saveSession(user.id, updatedMessages as SessionMessage[], sessionDate);
 
       if (transaction) {
         fetchStats();
@@ -256,6 +281,37 @@ export default function HomeScreen() {
     handleSend(text);
   };
 
+  const openHistory = async () => {
+    if (!user?.id) return;
+    const sessions = await loadAllSessions(user.id);
+    setHistorySessions(sessions);
+    setShowHistory(true);
+  };
+
+  const loadHistorySession = (session: ChatSession) => {
+    setMessages(session.messages as Message[]);
+    setActiveSessionDate(session.date);
+    setShowHistory(false);
+    welcomeAddedRef.current = true;
+  };
+
+  const returnToToday = async () => {
+    setActiveSessionDate(null);
+    welcomeAddedRef.current = true;
+    if (!user?.id) return;
+    const saved = await loadTodaySession(user.id);
+    if (saved && saved.length > 0) {
+      setMessages(saved as Message[]);
+    } else {
+      const name = firstName ?? 'there';
+      setMessages([{
+        id: 'welcome',
+        role: 'assistant',
+        content: `Hi ${name}! 👋 I'm Finni. Ask me anything about your finances or just say 'spent $X on Y' to log expenses`,
+      }]);
+    }
+  };
+
   const isConversationEmpty = messages.length <= 1;
 
   return (
@@ -269,13 +325,18 @@ export default function HomeScreen() {
         <View style={styles.topSection}>
           <View style={styles.header}>
             <Text style={styles.greeting}>{greeting}</Text>
-            <Pressable
-              style={styles.headerIconButton}
-              hitSlop={12}
-              onPress={() => navigation.navigate('Settings' as never)}
-            >
-              <Text style={styles.headerIcon}>⚙️</Text>
-            </Pressable>
+            <View style={styles.headerIcons}>
+              <Pressable style={styles.headerIconButton} hitSlop={12} onPress={openHistory}>
+                <Text style={styles.headerIcon}>🕐</Text>
+              </Pressable>
+              <Pressable
+                style={styles.headerIconButton}
+                hitSlop={12}
+                onPress={() => navigation.navigate('Settings' as never)}
+              >
+                <Text style={styles.headerIcon}>⚙️</Text>
+              </Pressable>
+            </View>
           </View>
           <Text style={styles.date}>{formatDate(today)}</Text>
 
@@ -295,6 +356,14 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.divider} />
+          {activeSessionDate && (
+            <View style={styles.sessionBanner}>
+              <Text style={styles.sessionBannerText}>📅 {formatSessionDate(activeSessionDate)}</Text>
+              <TouchableOpacity onPress={returnToToday} hitSlop={8}>
+                <Text style={styles.sessionBannerBack}>Back to Today →</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         {/* CHAT SECTION - flex 1, scrollable */}
@@ -311,14 +380,24 @@ export default function HomeScreen() {
                 <View style={styles.avatar}>
                   <Text style={styles.avatarText}>F</Text>
                 </View>
-                <View style={styles.assistantBubble}>
-                  <Text style={styles.bubbleText}>{msg.content}</Text>
+                <View style={{ flex: 1 }}>
+                  <View style={styles.assistantBubble}>
+                    <Text style={styles.bubbleText}>{msg.content}</Text>
+                  </View>
+                  {msg.timestamp && (
+                    <Text style={styles.messageTime}>{formatMessageTime(msg.timestamp)}</Text>
+                  )}
                 </View>
               </View>
             ) : (
               <View key={msg.id} style={styles.userRow}>
-                <View style={styles.userBubble}>
-                  <Text style={styles.bubbleText}>{msg.content}</Text>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <View style={styles.userBubble}>
+                    <Text style={styles.bubbleText}>{msg.content}</Text>
+                  </View>
+                  {msg.timestamp && (
+                    <Text style={[styles.messageTime, { textAlign: 'right' }]}>{formatMessageTime(msg.timestamp)}</Text>
+                  )}
                 </View>
               </View>
             )
@@ -379,6 +458,37 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Chat History Modal */}
+      <Modal visible={showHistory} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowHistory(false)}>
+        <SafeAreaView style={styles.historyModal} edges={['top', 'bottom']}>
+          <View style={styles.historyHeader}>
+            <Text style={styles.historyTitle}>Chat History</Text>
+            <TouchableOpacity onPress={() => setShowHistory(false)} hitSlop={12}>
+              <Text style={styles.historyClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.historySubtitle}>You can review and continue your last 20 days of conversations.</Text>
+          <ScrollView style={styles.historyScroll} contentContainerStyle={styles.historyContent} showsVerticalScrollIndicator={false}>
+            {historySessions.length === 0 ? (
+              <Text style={styles.historyEmpty}>No past sessions yet. Start chatting and your threads will appear here.</Text>
+            ) : (
+              historySessions.map((session) => (
+                <TouchableOpacity
+                  key={session.id}
+                  style={[styles.historyItem, session.date === (activeSessionDate ?? todayDateStr()) && styles.historyItemActive]}
+                  onPress={() => loadHistorySession(session)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.historyItemDate}>{formatSessionDate(session.date)}</Text>
+                  <Text style={styles.historyItemPreview} numberOfLines={1}>{session.preview}</Text>
+                  <Text style={styles.historyItemMeta}>{session.messages.length} messages · tap to open</Text>
+                </TouchableOpacity>
+              ))
+            )}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -513,14 +623,15 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   chipsScroll: {
-    maxHeight: 48,
+    flexShrink: 0,
     marginBottom: 8,
   },
   chipsContent: {
     flexDirection: 'row',
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 6,
     gap: 8,
+    alignItems: 'center',
   },
   chip: {
     flexShrink: 0,
@@ -570,5 +681,107 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: colors.textPrimary,
     fontWeight: '700',
+  },
+  headerIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  historyModal: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  historyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  historyTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  historyClose: {
+    fontSize: 20,
+    color: colors.textSecondary,
+    fontWeight: '600',
+  },
+  historyScroll: {
+    flex: 1,
+  },
+  historyContent: {
+    padding: 16,
+    gap: 10,
+  },
+  historySubtitle: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    lineHeight: 18,
+  },
+  historyEmpty: {
+    textAlign: 'center',
+    color: colors.textSecondary,
+    fontSize: 14,
+    marginTop: 40,
+    lineHeight: 22,
+    paddingHorizontal: 16,
+  },
+  historyItem: {
+    backgroundColor: colors.cardBackground,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 16,
+  },
+  historyItemActive: {
+    borderColor: colors.primary,
+    backgroundColor: 'rgba(99, 102, 241, 0.08)',
+  },
+  historyItemDate: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
+    marginBottom: 4,
+  },
+  historyItemPreview: {
+    fontSize: 14,
+    color: colors.textPrimary,
+    marginBottom: 4,
+  },
+  historyItemMeta: {
+    fontSize: 11,
+    color: colors.textSecondary,
+  },
+  sessionBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(99, 102, 241, 0.12)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 8,
+  },
+  sessionBannerText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  sessionBannerBack: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  messageTime: {
+    fontSize: 10,
+    color: colors.textSecondary,
+    marginTop: 3,
+    marginLeft: 4,
   },
 });

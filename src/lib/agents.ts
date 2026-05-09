@@ -126,7 +126,8 @@ export type DailyInsight = {
 
 export async function getDailyInsights(
   userId: string,
-  transactions: { withdrawal?: number; deposit?: number; description: string | null; category: string | null; date: string; type?: string }[]
+  transactions: { withdrawal?: number; deposit?: number; description: string | null; category: string | null; date: string; type?: string }[],
+  userPrompt?: string
 ): Promise<DailyInsight[]> {
   console.log('[Agent2] Running insights for user:', userId);
   console.log('[Agent2] Transactions found:', transactions?.length);
@@ -136,6 +137,21 @@ export async function getDailyInsights(
   const cacheKey = `insights_${userId}_${_localDate}`;
   const cached = await AsyncStorage.getItem(cacheKey);
   if (cached) return JSON.parse(cached);
+
+  const realTransactions = (transactions ?? []).filter((t) => {
+    const amount = t.type === 'expense' ? (Number(t.withdrawal) || 0) : (Number(t.deposit) || 0);
+    const desc = (t.description ?? '').trim();
+    return amount > 0 && desc.length >= 2 && (t.type === 'expense' || t.type === 'income');
+  });
+
+  const MIN_TRANSACTIONS = 50;
+  if (realTransactions.length < MIN_TRANSACTIONS) {
+    return [{
+      title: 'Building your insights...',
+      description: `Finni needs at least ${MIN_TRANSACTIONS} real transactions to generate accurate, personalized insights. You have ${realTransactions.length} so far — keep logging!`,
+      type: 'tip',
+    }];
+  }
 
   const totalSpent = transactions
     .filter((t) => t.type === 'expense')
@@ -150,15 +166,17 @@ export async function getDailyInsights(
   }));
 
   // Fetch enriched context
-  const [profileRes, goalsRes, incomeRes] = await Promise.all([
-    supabase.from('profiles').select('name, currency, location').eq('id', userId).maybeSingle(),
+  const [profileRes, goalsRes, incomeRes, catRes] = await Promise.all([
+    supabase.from('profiles').select('name, currency').eq('id', userId).maybeSingle(),
     supabase.from('financial_goals').select('name, target_amount, current_amount, goal_type, status').eq('user_id', userId),
     supabase.from('income').select('label, amount, frequency').eq('user_id', userId),
+    supabase.from('categories').select('name, budget, spent').eq('user_id', userId),
   ]);
 
-  const profile = profileRes.data as { name?: string; currency?: string; location?: string } | null;
+  const profile = profileRes.data as { name?: string; currency?: string } | null;
   const goals = (goalsRes.data ?? []) as { name: string; target_amount: number; current_amount: number; goal_type?: string; status?: string }[];
   const income = (incomeRes.data ?? []) as { label: string; amount: number; frequency: string }[];
+  const catBudgets = (catRes.data ?? []) as { name: string; budget: number; spent: number }[];
 
   const totalMonthlyIncome = income.reduce((sum, inc) => {
     const amt = Number(inc.amount) || 0;
@@ -168,12 +186,21 @@ export async function getDailyInsights(
   }, 0);
 
   const currency = profile?.currency ?? 'USD';
-  const location = profile?.location ?? '';
   const name = profile?.name ?? 'User';
 
   const goalsContext = goals.length
     ? goals.map((g) => `- ${g.name}: Target ${currency} ${g.target_amount}, Current ${currency} ${g.current_amount} (${g.goal_type ?? 'saving'}, ${g.status ?? 'in_progress'})`).join('\n')
     : 'No goals set yet.';
+
+  const categoryBudgetContext = catBudgets.filter((c) => Number(c.budget) > 0).length
+    ? catBudgets
+        .filter((c) => Number(c.budget) > 0)
+        .map((c) => {
+          const over = Number(c.spent) > Number(c.budget);
+          return `- ${c.name}: Budget ${currency} ${Number(c.budget).toFixed(2)}, Spent ${currency} ${Number(c.spent).toFixed(2)}${over ? ' ⚠ OVER BUDGET' : ''}`;
+        })
+        .join('\n')
+    : 'No category budgets set.';
 
   const incomeContext = income.length
     ? income.map((i) => `- ${i.label}: ${currency} ${i.amount} ${i.frequency}`).join('\n')
@@ -188,12 +215,14 @@ export async function getDailyInsights(
 
 USER PROFILE:
 - Name: ${name}
-- Location: ${location || 'Not specified'}
-- Currency: ${currency}
+- Currency: ${currency} (use this to infer regional context — e.g. BDT = Bangladesh, INR = India, GBP = UK, AUD = Australia, SGD = Singapore — tailor advice to local costs and norms)
 - Total Monthly Income: ${currency} ${totalMonthlyIncome.toFixed(2)}
 
 FINANCIAL GOALS:
 ${goalsContext}
+
+CATEGORY BUDGETS (monthly limits set by user):
+${categoryBudgetContext}
 
 INCOME SOURCES:
 ${incomeContext}
@@ -203,13 +232,13 @@ Total Spent: ${currency} ${totalSpent.toFixed(2)}, Total Income Logged: ${curren
 ${JSON.stringify(normalized)}
 
 INSTRUCTIONS:
-1. Analyze spending patterns per category against income — be specific with numbers.
+1. Analyze spending per category against its budget — flag any category marked OVER BUDGET as a warning.
 2. Track progress toward each financial goal and state clearly if on track or falling behind.
-3. ${location ? `Use the user's location (${location}) for local context and saving tips.` : 'Give general saving tips.'}
-4. Use ${currency} for all amounts.
-5. ${incomeAlertInstruction}
-6. Be warm, encouraging, and coach-like — not robotic.
-7. Generate exactly 3-4 insights total.
+3. Use ${currency} for all amounts.
+4. ${incomeAlertInstruction}
+5. Be warm, encouraging, and coach-like — not robotic.
+6. Generate exactly 3-4 insights total.
+${userPrompt ? `7. ADDITIONAL INSTRUCTIONS FROM USER: ${userPrompt}` : ''}
 
 Respond ONLY with a valid JSON array (no markdown):
 [{ "title": "...", "description": "...", "suggestion": "...", "type": "warning|tip|goal|income_alert" }]`;
@@ -226,10 +255,15 @@ Respond ONLY with a valid JSON array (no markdown):
     }
     await AsyncStorage.setItem(cacheKey, JSON.stringify(insights));
 
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const _yDate = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
-    await AsyncStorage.removeItem(`insights_${userId}_${_yDate}`);
+    // Clean up stale insight cache keys from the past 7 days
+    const cleanupKeys: string[] = [];
+    for (let i = 1; i <= 7; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      cleanupKeys.push(`insights_${userId}_${dateStr}`);
+    }
+    await AsyncStorage.multiRemove(cleanupKeys);
 
     return insights;
   } catch (e) {
@@ -255,6 +289,13 @@ export async function getWeeklySavingsRecommendations(
   const weekKey = `savings_${userId}_week_${getWeekNumber()}`;
   const cached = await AsyncStorage.getItem(weekKey);
   if (cached) return JSON.parse(cached);
+
+  const realTx = (transactions ?? []).filter((t) => {
+    const amount = t.type === 'expense' ? (Number(t.withdrawal) || 0) : (Number(t.deposit) || 0);
+    const desc = (t.description ?? '').trim();
+    return amount > 0 && desc.length >= 2 && (t.type === 'expense' || t.type === 'income');
+  });
+  if (realTx.length < 50) return [];
 
   const totalSpent =
     transactions
@@ -335,6 +376,9 @@ export type ChatAgentContext = {
 
 const TRANSACTION_DATA_REGEX = /TRANSACTION_DATA:\s*(\{[\s\S]*?\})(?:\s|$)/;
 const NEW_CATEGORY_REGEX = /NEW_CATEGORY:\s*(\{[\s\S]*?\})(?:\s|$)/;
+const GOAL_UPDATE_REGEX = /GOAL_UPDATE:\s*(\{[\s\S]*?\})(?:\s|$)/;
+const GOAL_CREATE_REGEX = /GOAL_CREATE:\s*(\{[\s\S]*?\})(?:\s|$)/;
+const CATEGORY_BUDGET_REGEX = /CATEGORY_BUDGET:\s*(\{[\s\S]*?\})(?:\s|$)/;
 const STANDALONE_CATEGORY_CREATE_REGEX = /✅ Created '([^']+)' category/i;
 
 const CATEGORY_EMOJI_MAP: Record<string, string> = {
@@ -353,19 +397,29 @@ const CATEGORY_EMOJI_MAP: Record<string, string> = {
   utilities: '🔌',
   clothing: '👕',
   tech: '💻',
+  other: '💰',
+  miscellaneous: '💰',
+  misc: '💰',
 };
 
 function extractTransactionData(text: string): {
   response: string;
   txData: Record<string, unknown> | null;
   newCategory: Record<string, unknown> | null;
+  goalUpdate: { goal_name: string; amount: number } | null;
+  goalCreate: { name: string; target_amount: number; goal_type: string } | null;
+  categoryBudgetUpdate: { category_name: string; budget: number } | null;
   txParseError: boolean;
 } {
   const txMatch = text.match(TRANSACTION_DATA_REGEX);
   const catMatch = text.match(NEW_CATEGORY_REGEX);
+  const goalUpdateMatch = text.match(GOAL_UPDATE_REGEX);
+  const goalCreateMatch = text.match(GOAL_CREATE_REGEX);
 
   let txData: Record<string, unknown> | null = null;
   let newCategory: Record<string, unknown> | null = null;
+  let goalUpdate: { goal_name: string; amount: number } | null = null;
+  let goalCreate: { name: string; target_amount: number; goal_type: string } | null = null;
   let txParseError = false;
   let response = text;
 
@@ -377,6 +431,32 @@ function extractTransactionData(text: string): {
     }
     response = response.replace(NEW_CATEGORY_REGEX, '').trim();
   }
+  if (goalUpdateMatch) {
+    try {
+      const parsed = JSON.parse(goalUpdateMatch[1]);
+      if (typeof parsed.goal_name === 'string' && typeof parsed.amount === 'number') {
+        goalUpdate = { goal_name: parsed.goal_name, amount: parsed.amount };
+      }
+    } catch (e) {
+      console.error('[Agent] Failed to parse GOAL_UPDATE JSON:', e);
+    }
+    response = response.replace(GOAL_UPDATE_REGEX, '').trim();
+  }
+  if (goalCreateMatch) {
+    try {
+      const parsed = JSON.parse(goalCreateMatch[1]);
+      if (typeof parsed.name === 'string' && typeof parsed.target_amount === 'number') {
+        goalCreate = {
+          name: parsed.name,
+          target_amount: parsed.target_amount,
+          goal_type: parsed.goal_type ?? 'saving',
+        };
+      }
+    } catch (e) {
+      console.error('[Agent] Failed to parse GOAL_CREATE JSON:', e);
+    }
+    response = response.replace(GOAL_CREATE_REGEX, '').trim();
+  }
   if (txMatch) {
     try {
       txData = JSON.parse(txMatch[1]) as Record<string, unknown>;
@@ -387,14 +467,29 @@ function extractTransactionData(text: string): {
     response = response.replace(TRANSACTION_DATA_REGEX, '').trim();
   }
 
-  return { response, txData, newCategory, txParseError };
+  const catBudgetMatch = text.match(CATEGORY_BUDGET_REGEX);
+  let categoryBudgetUpdate: { category_name: string; budget: number } | null = null;
+  if (catBudgetMatch) {
+    try {
+      const parsed = JSON.parse(catBudgetMatch[1]);
+      if (typeof parsed.category_name === 'string' && typeof parsed.budget === 'number') {
+        categoryBudgetUpdate = { category_name: parsed.category_name, budget: parsed.budget };
+      }
+    } catch (e) {
+      console.error('[Agent] Failed to parse CATEGORY_BUDGET JSON:', e);
+    }
+    response = response.replace(CATEGORY_BUDGET_REGEX, '').trim();
+  }
+
+  return { response, txData, newCategory, goalUpdate, goalCreate, categoryBudgetUpdate, txParseError };
 }
 
 export async function chatAgent(
   userMessage: string,
   userId: string,
   messages: ChatMessage[],
-  context?: ChatAgentContext
+  context?: ChatAgentContext,
+  sessionDate?: string
 ): Promise<ChatAgentResult> {
   console.log('[Agent1] API Key configured:', !!GEMINI_API_KEY);
   console.log('[Agent1] User ID:', userId);
@@ -404,15 +499,42 @@ export async function chatAgent(
   const categories = context?.categories ?? [];
   const goals = context?.goals ?? [];
 
+  const now = new Date();
+  const todayDateStr = sessionDate ?? now.toISOString().split('T')[0];
+  const sessionDateObj = sessionDate ? new Date(sessionDate) : now;
+  const todayStart = new Date(sessionDateObj.getFullYear(), sessionDateObj.getMonth(), sessionDateObj.getDate()).toISOString();
+  const monthStart = new Date(sessionDateObj.getFullYear(), sessionDateObj.getMonth(), 1).toISOString();
+
   const ninetyDaysAgo = new Date();
   ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
   const { data: transactions } = await supabase
     .from('transactions')
     .select('withdrawal, deposit, description, category_id, type, date')
     .eq('user_id', userId)
-    .gte('date', ninetyDaysAgo.toISOString())
+    .gte('date', ninetyDaysAgo.toISOString().split('T')[0])
     .order('date', { ascending: false })
-    .limit(50);
+    .limit(100);
+
+  // Fetch monthly income as the budget source of truth
+  const { data: incomeData } = await supabase
+    .from('income')
+    .select('amount, frequency')
+    .eq('user_id', userId);
+  const monthlyIncome = (incomeData ?? []).reduce((sum, r) => {
+    const amt = Number(r.amount) || 0;
+    if (r.frequency === 'weekly') return sum + amt * 4.33;
+    if (r.frequency === 'annual') return sum + amt / 12;
+    return sum + amt;
+  }, 0);
+
+  // Pre-calculate totals so Gemini doesn't have to do date math
+  const todaySpent = (transactions ?? [])
+    .filter((t) => t.type === 'expense' && t.date >= todayStart)
+    .reduce((sum, t) => sum + (Number(t.withdrawal) || 0), 0);
+  const monthSpent = (transactions ?? [])
+    .filter((t) => t.type === 'expense' && t.date >= monthStart)
+    .reduce((sum, t) => sum + (Number(t.withdrawal) || 0), 0);
+  const monthLeft = Math.max(0, monthlyIncome - monthSpent);
 
   const transactionContext = transactions?.length
     ? `Here is the user's transaction history for the last 90 days:\n${JSON.stringify(transactions, null, 2)}`
@@ -423,10 +545,21 @@ You have access to the user's real financial data.
 
 User: ${profile?.name ?? 'User'}
 Currency: ${profile?.currency || 'USD'}
+Current date (TODAY): ${todayDateStr}${sessionDate && sessionDate !== now.toISOString().split('T')[0] ? `\nNOTE: The user is adding to a past thread from ${todayDateStr}. Record all transactions for that date.` : ''}
+Pre-calculated totals (authoritative — use these when answering spending questions):
+- Monthly income (budget): ${monthlyIncome.toFixed(2)} ${profile?.currency || 'USD'}
+- Today's total spending: ${todaySpent.toFixed(2)} ${profile?.currency || 'USD'}
+- This month's total spending: ${monthSpent.toFixed(2)} ${profile?.currency || 'USD'}
+- Remaining budget this month: ${monthLeft.toFixed(2)} ${profile?.currency || 'USD'}
 Categories: ${JSON.stringify(categories?.map((c) => ({ id: c.id, name: c.name, emoji: c.emoji, budget: c.budget, spent: c.spent })))}
 Goals: ${JSON.stringify(goals?.map((g) => ({ name: g.name, target: g.target_amount, current: g.current_amount })))}
 
 ${transactionContext}
+
+UNINTELLIGIBLE INPUT:
+If the input is gibberish, random characters, or cannot be interpreted as a financial transaction or question, respond with:
+"I didn't quite get that. Try something like 'Spent $20 on lunch' or 'Received $500 salary'."
+Do NOT emit TRANSACTION_DATA or create categories.
 
 FINANCIAL QUERY RULES:
 - Use the transaction data above to answer ANY financial questions directly. Calculate totals, breakdowns, and summaries yourself.
@@ -446,6 +579,8 @@ Map what the user spent on to a category type:
 - "electricity/water/rent/phone bill/internet/bills" → Bills
 - "gym/doctor/medicine/pharmacy/health" → Health
 - "shirt/shoes/shopping/amazon/clothes/mall" → Shopping
+- "course/tuition/school/university/books/class/training/workshop" → Education
+- "miscellaneous/misc/other/random/various" → Other
 
 STEP 2 - MATCH TO USER'S CATEGORIES:
 Compare your semantic analysis to the user's actual category list above.
@@ -494,11 +629,35 @@ INCOME vs EXPENSE:
 - Income: received, earned, salary, got paid, freelance, refund
 - If ambiguous: ask "Was that an expense or income?"
 
-CRITICAL RULES:
-1. ALWAYS write a friendly confirmation message first (e.g. "✅ Logged $1.25 under Food.")
-2. THEN on the very last line append TRANSACTION_DATA
-3. Never return ONLY TRANSACTION_DATA with no message above it
-4. Never put any text after TRANSACTION_DATA
+CATEGORY BUDGET SETTING — MANDATORY:
+If the user asks to set, update, or assign a budget for a specific category (e.g. "set my food budget to $300", "what should my food budget be" then confirms an amount), emit on its own line:
+CATEGORY_BUDGET:{"category_name": "exact category name", "budget": <number>}
+Example:
+  I've set your Food budget to $300/month!
+  CATEGORY_BUDGET:{"category_name": "Food", "budget": 300}
+NEVER say you set a budget without emitting CATEGORY_BUDGET.
+
+GOAL CREATION — MANDATORY:
+Whenever you create OR confirm creating a financial goal (whether the user asked now or in a previous message), you MUST emit GOAL_CREATE on its own line. Without it, the goal is NOT saved.
+Format: GOAL_CREATE:{"name": "Goal Name", "target_amount": <number>, "goal_type": "saving"|"debt_payment"|"investment"|"expense"}
+Example of a CORRECT response when creating a goal:
+  I've created an "Eid Shopping" goal for you with a target of $400!
+  GOAL_CREATE:{"name": "Eid Shopping", "target_amount": 400, "goal_type": "saving"}
+NEVER say you created a goal without appending GOAL_CREATE. If you already mentioned creating a goal in a prior message but didn't emit GOAL_CREATE, emit it now.
+
+GOAL CONTRIBUTION TRACKING:
+If the user is explicitly saving toward or contributing to a named goal (e.g., "saving for Bangkok", "adding to emergency fund", "paying off loan"), AND a matching goal exists in the Goals list above:
+- Log the transaction normally with TRANSACTION_DATA
+- Also emit on its own line BEFORE TRANSACTION_DATA: GOAL_UPDATE:{"goal_name": "exact goal name from Goals list", "amount": <number>}
+
+CRITICAL RULES — YOU MUST FOLLOW THESE EXACTLY:
+1. Every time you log a transaction, your response MUST end with TRANSACTION_DATA on its own line.
+2. Format: TRANSACTION_DATA:{"amount": number, "description": "string", "category_id": "CategoryName", "type": "expense"|"income"}
+3. Write the confirmation message first, then TRANSACTION_DATA last. Nothing after TRANSACTION_DATA.
+4. Example of a CORRECT response:
+   ✅ Logged $650 under Shopping.
+   TRANSACTION_DATA:{"amount": 650, "description": "Daraz order", "category_id": "Shopping", "type": "expense"}
+5. NEVER respond with only the confirmation text and no TRANSACTION_DATA — the app cannot save without it.
 
 Current user message: ${userMessage}`;
 
@@ -516,7 +675,7 @@ Current user message: ${userMessage}`;
 
   try {
     const text = await callGeminiWithHistory(contents);
-    const { response, txData, newCategory, txParseError } = extractTransactionData(text);
+    let { response, txData, newCategory, goalUpdate, goalCreate, categoryBudgetUpdate, txParseError } = extractTransactionData(text);
 
     if (txParseError) {
       return {
@@ -525,12 +684,36 @@ Current user message: ${userMessage}`;
       };
     }
 
-    // Fallback if Gemini returns empty response after stripping TRANSACTION_DATA
+    // Fallback: if Gemini dropped TRANSACTION_DATA but wrote "✅ Logged $X under Y.", parse it directly
+    if (!txData && !newCategory) {
+      const loggedMatch = response.match(/✅\s+Logged\s+\$?([\d.]+)\s+under\s+([^.\n!]+)/i);
+      if (loggedMatch) {
+        const parsedAmount = parseFloat(loggedMatch[1]);
+        const parsedCategory = loggedMatch[2].trim().replace(/['"]/g, '');
+        if (!isNaN(parsedAmount) && parsedAmount > 0) {
+          console.log(`[Agent1] Fallback parse: amount=${parsedAmount}, category="${parsedCategory}"`);
+          txData = {
+            amount: parsedAmount,
+            description: userMessage,
+            category_id: parsedCategory,
+            type: 'expense',
+          };
+        }
+      }
+    }
+
+    // Fallback if Gemini returns empty response after stripping TRANSACTION_DATA.
+    // At this point txData.category_id is still the name string from Gemini (e.g. "Food"),
+    // not a UUID — search by name, not id.
     const sym = getCurrencySymbol(profile?.currency);
+    const fallbackCatName = txData
+      ? (categories?.find((c) => c.name.toLowerCase() === String(txData.category_id ?? '').toLowerCase())?.name
+          ?? String(txData.category_id ?? 'expenses'))
+      : null;
     const finalResponse =
       response.trim() ||
       (txData
-        ? `✅ Logged ${sym}${Math.abs(Number(txData.amount)).toFixed(2)} under ${categories?.find((c) => c.id === txData.category_id)?.name ?? 'expenses'}.`
+        ? `✅ Logged ${sym}${Math.abs(Number(txData.amount)).toFixed(2)} under ${fallbackCatName}.`
         : "I couldn't process that. Please try again.");
 
     // Bug 1 fix: Detect standalone category creation (no TRANSACTION_DATA or NEW_CATEGORY tags)
@@ -700,7 +883,7 @@ Current user message: ${userMessage}`;
         given_to: description || '',
         description: description || '',
         type,
-        date: new Date().toISOString(),
+        date: sessionDate ? new Date(sessionDate).toISOString() : new Date().toISOString(),
         matching_score: Math.round((matchingScore ?? 0) * 100),
       };
       if (categoryId) insertData.category_id = categoryId;
@@ -715,6 +898,32 @@ Current user message: ${userMessage}`;
           transaction: null,
         };
       }
+
+      // Update goal current_amount if this transaction is a goal contribution
+      if (goalUpdate) {
+        const { data: matchedGoals } = await supabase
+          .from('financial_goals')
+          .select('id, current_amount, name')
+          .eq('user_id', userId)
+          .ilike('name', goalUpdate.goal_name);
+        const goal = matchedGoals?.[0];
+        if (goal) {
+          const newAmount = Number(goal.current_amount ?? 0) + goalUpdate.amount;
+          const { error: goalError } = await supabase
+            .from('financial_goals')
+            .update({ current_amount: newAmount })
+            .eq('id', goal.id)
+            .eq('user_id', userId);
+          if (goalError) {
+            console.error('[Agent1] Goal update error:', goalError);
+          } else {
+            console.log(`[Agent1] Goal "${goal.name}" updated: ${goal.current_amount} → ${newAmount}`);
+          }
+        } else {
+          console.warn('[Agent1] GOAL_UPDATE: no matching goal found for name:', goalUpdate.goal_name);
+        }
+      }
+
       return {
         response: finalResponse,
         transaction: {
@@ -725,6 +934,76 @@ Current user message: ${userMessage}`;
           type: type as 'expense' | 'income',
         },
       };
+    }
+
+    // Fallback: only match past-tense confirmations, not proposals
+    if (!goalCreate) {
+      const isConfirmation = /(?:i(?:'ve| have) created|created a (?:new )?(?:savings |financial )?goal)/i.test(response);
+      if (isConfirmation) {
+        const createdMatch = response.match(/(?:created).*?[''""]([^''""]+)[''""].*?\$?([\d,.]+)/i);
+        const mdMatch = response.match(/\*\*Goal(?:\s+Name)?:\*\*\s+(.+?)(?:\n|$)[\s\S]*?\*\*Target[^:]*:\*\*\s+\$?([\d,.]+)/i);
+        const m = createdMatch ?? mdMatch;
+        if (m) {
+          const parsedTarget = parseFloat(m[2].replace(/,/g, ''));
+          if (m[1] && !isNaN(parsedTarget) && parsedTarget > 0) {
+            console.log(`[Agent1] Fallback GOAL_CREATE: name="${m[1].trim()}", target=${parsedTarget}`);
+            goalCreate = { name: m[1].trim(), target_amount: parsedTarget, goal_type: 'saving' };
+          }
+        }
+      }
+    }
+
+    // Create a new goal if Gemini emitted GOAL_CREATE — with duplicate check
+    if (goalCreate) {
+      const { data: existingGoal } = await supabase
+        .from('financial_goals')
+        .select('id')
+        .eq('user_id', userId)
+        .ilike('name', goalCreate.name)
+        .maybeSingle();
+      if (existingGoal) {
+        console.log(`[Agent1] Goal "${goalCreate.name}" already exists, skipping duplicate insert`);
+        goalCreate = null;
+      }
+    }
+
+    if (goalCreate) {
+      const { error: gcError } = await supabase.from('financial_goals').insert({
+        user_id: userId,
+        name: goalCreate.name,
+        target_amount: goalCreate.target_amount,
+        current_amount: 0,
+        goal_type: goalCreate.goal_type,
+        status: 'in_progress',
+        target_date: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+      });
+      if (gcError) {
+        console.error('[Agent1] Goal create error:', gcError);
+      } else {
+        console.log(`[Agent1] Goal created: "${goalCreate.name}" target=${goalCreate.target_amount}`);
+        clearAgentCache(userId).catch(() => {});
+      }
+    }
+
+    // Update category budget if Gemini emitted CATEGORY_BUDGET
+    if (categoryBudgetUpdate) {
+      const { data: matchedCats } = await supabase
+        .from('categories')
+        .select('id, name')
+        .eq('user_id', userId)
+        .ilike('name', categoryBudgetUpdate.category_name);
+      const cat = matchedCats?.[0];
+      if (cat) {
+        const { error: cbError } = await supabase
+          .from('categories')
+          .update({ budget: categoryBudgetUpdate.budget, type: 'monthly' })
+          .eq('id', cat.id)
+          .eq('user_id', userId);
+        if (cbError) console.error('[Agent1] Category budget update error:', cbError);
+        else console.log(`[Agent1] Category "${cat.name}" budget set to ${categoryBudgetUpdate.budget}`);
+      } else {
+        console.warn('[Agent1] CATEGORY_BUDGET: no matching category for:', categoryBudgetUpdate.category_name);
+      }
     }
 
     return { response: finalResponse, transaction: null };

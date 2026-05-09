@@ -113,6 +113,7 @@ export default function TransactionsScreen() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterOption>('all');
+  const [monthlyIncomeTotal, setMonthlyIncomeTotal] = useState(0);
 
   const fetchTransactions = useCallback(() => {
     if (!user?.id) {
@@ -144,10 +145,26 @@ export default function TransactionsScreen() {
       });
   }, [user?.id]);
 
+  const fetchMonthlyIncome = useCallback(async () => {
+    if (!user?.id) return;
+    const { data } = await supabase
+      .from('income')
+      .select('amount, frequency')
+      .eq('user_id', user.id);
+    const total = (data ?? []).reduce((sum, r) => {
+      const amt = Number(r.amount) || 0;
+      if (r.frequency === 'weekly') return sum + amt * 4.33;
+      if (r.frequency === 'annual') return sum + amt / 12;
+      return sum + amt;
+    }, 0);
+    setMonthlyIncomeTotal(total);
+  }, [user?.id]);
+
   useFocusEffect(
     React.useCallback(() => {
       fetchTransactions();
-    }, [fetchTransactions])
+      fetchMonthlyIncome();
+    }, [fetchTransactions, fetchMonthlyIncome])
   );
 
   const filteredAndGrouped = useMemo(() => {
@@ -200,8 +217,12 @@ export default function TransactionsScreen() {
         else income += Number(t.deposit) || 0;
       }
     }
+    // Add recurring monthly income from income table for all/month views
+    if ((filter === 'all' || filter === 'month') && monthlyIncomeTotal > 0) {
+      income += monthlyIncomeTotal;
+    }
     return { spent, income };
-  }, [filteredAndGrouped]);
+  }, [filteredAndGrouped, filter, monthlyIncomeTotal]);
 
   const filterChips: { key: FilterOption; label: string }[] = [
     { key: 'all', label: 'All' },

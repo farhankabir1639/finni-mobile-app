@@ -98,8 +98,6 @@ export default function GoalsModal({ userId, onClose }: { userId: string; onClos
       goal_type: selectedGoalType,
       status: 'in_progress',
       category_id: selectedCategoryId || null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
     };
     const { error } = await supabase.from('financial_goals').insert(payload);
     setSaving(false);
@@ -122,6 +120,7 @@ export default function GoalsModal({ userId, onClose }: { userId: string; onClos
     const { error } = await supabase.from('financial_goals').delete().eq('id', id).eq('user_id', userId);
     if (error) { console.warn('Goal delete error:', error); return; }
     setGoals((g) => g.filter((x) => x.id !== id));
+    clearAgentCache(userId).catch(() => {});
   };
 
   return (

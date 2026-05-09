@@ -57,31 +57,39 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const [profileLoading, setProfileLoading] = useState(true);
 
   const refreshProfile = useCallback(async () => {
+    console.log('[ProfileContext] refreshProfile called, user.id =', user?.id);
     if (!user?.id) {
       setProfile(defaultProfile);
       setProfileLoading(false);
       return;
     }
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('profiles')
-        .select('name, currency, location, monthly_budget, onboarding_complete')
+        .select('name, currency, onboarding_complete')
         .eq('id', user.id)
         .maybeSingle();
+      console.log('[ProfileContext] fetched data:', data);
+      console.log('[ProfileContext] onboarding_complete value:', (data as any)?.onboarding_complete);
+      console.log('[ProfileContext] error:', error);
       if (data) {
-        setProfile({
+        const nextProfile = {
           name: (data as any).name ?? null,
           currency: (data as any).currency ?? 'USD',
-          location: (data as any).location ?? null,
-          monthlyBudget: Number((data as any).monthly_budget) || 0,
+          location: null,
+          monthlyBudget: 0,
           onboardingComplete: (data as any).onboarding_complete ?? true,
-        });
+        };
+        console.log('[ProfileContext] setting profile, onboardingComplete =', nextProfile.onboardingComplete);
+        setProfile(nextProfile);
+        console.log('[ProfileContext] profile state updated');
       } else {
+        console.log('[ProfileContext] no data row found, setting onboardingComplete = false');
         setProfile({ ...defaultProfile, onboardingComplete: false });
       }
     } catch (e) {
       console.error('[ProfileContext] refreshProfile error:', e);
-      setProfile({ ...defaultProfile, onboardingComplete: true });
+      setProfile({ ...defaultProfile, onboardingComplete: false });
     } finally {
       setProfileLoading(false);
     }

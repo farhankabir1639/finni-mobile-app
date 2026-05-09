@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  TextInput,
   ActivityIndicator,
   Dimensions,
 } from 'react-native';
@@ -145,14 +146,36 @@ export default function AnalyticsScreen() {
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<PeriodOption>('month');
   const [monthlyIncome, setMonthlyIncome] = useState(0);
-  const [categories, setCategories] = useState<{ id: string; name: string; emoji: string }[]>([]);
+  const [categories, setCategories] = useState<{ id: string; name: string; emoji: string; budget?: number }[]>([]);
   const [insights, setInsights] = useState<DailyInsight[]>([]);
   const [savingsRecs, setSavingsRecs] = useState<SavingsRecommendation[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [showRefreshButton, setShowRefreshButton] = useState(false);
   const [insightsError, setInsightsError] = useState('');
+  const [userInsightPrompt, setUserInsightPrompt] = useState('');
+  const [promptDraft, setPromptDraft] = useState('');
+  const [showPromptEditor, setShowPromptEditor] = useState(false);
   const syncAttemptedRef = useRef(false);
+
+  const USER_PROMPT_KEY = user?.id ? `insights_user_prompt_${user.id}` : null;
+  const USER_PROMPT_MAX = 250;
+
+  useEffect(() => {
+    if (!USER_PROMPT_KEY) return;
+    AsyncStorage.getItem(USER_PROMPT_KEY).then((val) => {
+      if (val) { setUserInsightPrompt(val); setPromptDraft(val); }
+    });
+  }, [USER_PROMPT_KEY]);
+
+  const saveUserPrompt = async () => {
+    if (!USER_PROMPT_KEY) return;
+    const trimmed = promptDraft.trim();
+    setUserInsightPrompt(trimmed);
+    if (trimmed) await AsyncStorage.setItem(USER_PROMPT_KEY, trimmed);
+    else await AsyncStorage.removeItem(USER_PROMPT_KEY);
+    setShowPromptEditor(false);
+  };
 
   // Fetch fresh insights from Gemini, cache result with today's local-date key
   const fetchAndCacheInsights = useCallback(async () => {
@@ -174,7 +197,7 @@ export default function AnalyticsScreen() {
         .map((t) => ({ ...t, category: t.category ?? null }));
 
       const [freshInsights, freshSavings] = await Promise.all([
-        getDailyInsights(user.id, monthTx),
+        getDailyInsights(user.id, monthTx, userInsightPrompt || undefined),
         getWeeklySavingsRecommendations(user.id, monthTx),
       ]);
 
@@ -198,7 +221,7 @@ export default function AnalyticsScreen() {
     } finally {
       setInsightsLoading(false);
     }
-  }, [user?.id, transactions]);
+  }, [user?.id, transactions, userInsightPrompt]);
 
   // On load: check today's cache → auto-fetch if transactions today → fall back to yesterday
   const syncInsights = useCallback(async () => {
@@ -253,7 +276,7 @@ export default function AnalyticsScreen() {
 
     const [txRes, catRes, incomeRes] = await Promise.all([
       supabase.from('transactions').select('*').eq('user_id', user.id).order('date', { ascending: false }),
-      supabase.from('categories').select('id, name, emoji').eq('user_id', user.id),
+      supabase.from('categories').select('id, name, emoji, budget').eq('user_id', user.id),
       supabase.from('income').select('amount, frequency').eq('user_id', user.id),
     ]);
 
@@ -287,7 +310,7 @@ export default function AnalyticsScreen() {
 
   // Run sync once per focus after transactions are loaded
   useEffect(() => {
-    if (transactions.length >= 1 && user?.id && !syncAttemptedRef.current) {
+    if (transactions.length >= 50 && user?.id && !syncAttemptedRef.current) {
       syncAttemptedRef.current = true;
       syncInsights();
     }
@@ -449,10 +472,15 @@ export default function AnalyticsScreen() {
             </>
           ) : (
             byCategory.map((cat) => {
-              const pct = totalSpent > 0 ? (cat.amount / totalSpent) * 100 : 0;
-              const catColor = getCategoryColor(cat.name);
-              const emoji =
-                categories.find((c) => c.name === cat.name)?.emoji ?? getCategoryEmoji(cat.name);
+              const catObj = categories.find((c) => c.name === cat.name);
+              const budget = catObj?.budget ?? 0;
+              const hasBudget = budget > 0;
+              const pct = hasBudget
+                ? Math.min(100, (cat.amount / budget) * 100)
+                : totalSpent > 0 ? (cat.amount / totalSpent) * 100 : 0;
+              const overBudget = hasBudget && cat.amount > budget;
+              const catColor = overBudget ? '#EF4444' : getCategoryColor(cat.name);
+              const emoji = catObj?.emoji ?? getCategoryEmoji(cat.name);
               return (
                 <View key={cat.name} style={styles.categoryRow}>
                   <View style={styles.categoryRowLeft}>
@@ -461,12 +489,15 @@ export default function AnalyticsScreen() {
                   </View>
                   <View style={styles.categoryRowMiddle}>
                     <View style={styles.progressTrack}>
-                      <View
-                        style={[styles.progressFill, { width: `${pct}%`, backgroundColor: catColor }]}
-                      />
+                      <View style={[styles.progressFill, { width: `${pct}%`, backgroundColor: catColor }]} />
                     </View>
+                    {hasBudget && (
+                      <Text style={{ fontSize: 10, color: overBudget ? '#EF4444' : colors.textSecondary, marginTop: 2 }}>
+                        {overBudget ? '⚠ ' : ''}{currencySymbol}{cat.amount.toFixed(0)} / {currencySymbol}{budget.toFixed(0)}
+                      </Text>
+                    )}
                   </View>
-                  <Text style={styles.categoryAmount}>
+                  <Text style={[styles.categoryAmount, overBudget && { color: '#EF4444' }]}>
                     {currencySymbol}{cat.amount.toFixed(2)}
                   </Text>
                 </View>
@@ -535,25 +566,71 @@ export default function AnalyticsScreen() {
         </View>
 
         {/* AI Insights */}
-        {transactions.length >= 1 && (
+        {transactions.length < 50 ? (
+          <View style={[styles.aiInsightCard, { borderColor: colors.border }]}>
+            <Text style={[styles.aiInsightTitle, { color: colors.textSecondary }]}>📊 Insights</Text>
+            <Text style={styles.aiInsightSubtitle}>
+              Finni needs at least 50 real transactions to generate accurate, personalized insights.{'\n\n'}
+              {transactions.length > 0
+                ? `You have ${transactions.length} so far — ${50 - transactions.length} more to go!`
+                : 'Start by logging your first expense in the chat.'}
+            </Text>
+          </View>
+        ) : (
           <>
             <View style={styles.aiInsightsHeader}>
               <Text style={styles.sectionTitle}>AI Insights</Text>
-              {showRefreshButton && (
+              <View style={{ flexDirection: 'row', gap: 8 }}>
                 <TouchableOpacity
                   style={styles.refreshButton}
-                  onPress={fetchAndCacheInsights}
-                  disabled={insightsLoading}
+                  onPress={() => { setPromptDraft(userInsightPrompt); setShowPromptEditor((v) => !v); }}
                   activeOpacity={0.8}
                 >
-                  {insightsLoading ? (
-                    <ActivityIndicator size="small" color="#6366F1" />
-                  ) : (
-                    <Text style={styles.refreshButtonText}>Refresh</Text>
-                  )}
+                  <Text style={styles.refreshButtonText}>✏️ Customize</Text>
                 </TouchableOpacity>
-              )}
+                {showRefreshButton && (
+                  <TouchableOpacity
+                    style={styles.refreshButton}
+                    onPress={fetchAndCacheInsights}
+                    disabled={insightsLoading}
+                    activeOpacity={0.8}
+                  >
+                    {insightsLoading ? (
+                      <ActivityIndicator size="small" color="#6366F1" />
+                    ) : (
+                      <Text style={styles.refreshButtonText}>Refresh</Text>
+                    )}
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
+            {showPromptEditor && (
+              <View style={styles.promptEditor}>
+                <Text style={styles.promptEditorLabel}>
+                  Add custom instructions for your insights (e.g. "Focus on food spending" or "Be more encouraging")
+                </Text>
+                <TextInput
+                  style={styles.promptEditorInput}
+                  value={promptDraft}
+                  onChangeText={(t) => setPromptDraft(t.slice(0, USER_PROMPT_MAX))}
+                  placeholder="e.g. Focus on food and transport. Be very concise."
+                  placeholderTextColor={colors.textSecondary}
+                  multiline
+                  maxLength={USER_PROMPT_MAX}
+                />
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                  <Text style={styles.promptCharCount}>{promptDraft.length}/{USER_PROMPT_MAX}</Text>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity onPress={() => setShowPromptEditor(false)} style={styles.promptCancelBtn}>
+                      <Text style={styles.promptCancelText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={saveUserPrompt} style={styles.promptSaveBtn}>
+                      <Text style={styles.promptSaveText}>Save</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            )}
             {lastUpdated && (
               <Text style={styles.lastUpdatedText}>{formatLastUpdated(lastUpdated)}</Text>
             )}
@@ -923,5 +1000,57 @@ const styles = StyleSheet.create({
   insightCTAText: {
     fontSize: 13,
     fontWeight: '600',
+  },
+  promptEditor: {
+    backgroundColor: colors.cardBackground,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+  },
+  promptEditorLabel: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginBottom: 8,
+    lineHeight: 18,
+  },
+  promptEditorInput: {
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    padding: 10,
+    fontSize: 14,
+    color: colors.textPrimary,
+    minHeight: 72,
+    textAlignVertical: 'top',
+  },
+  promptCharCount: {
+    fontSize: 11,
+    color: colors.textSecondary,
+  },
+  promptCancelBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  promptCancelText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  promptSaveBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: colors.primary,
+  },
+  promptSaveText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textPrimary,
   },
 });
