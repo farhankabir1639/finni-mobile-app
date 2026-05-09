@@ -398,11 +398,6 @@ export default function AnalyticsScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <View style={styles.disclaimerBanner}>
-        <Text style={styles.disclaimerBannerText}>
-          ⚠️ For informational purposes only. Not financial advice. Consult a qualified professional before making financial decisions.
-        </Text>
-      </View>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -703,6 +698,9 @@ export default function AnalyticsScreen() {
                 </>
               )}
             </View>
+            <Text style={styles.insightsFootnote}>
+              AI-generated insights are for informational purposes only and do not constitute financial advice.
+            </Text>
           </>
         )}
       </ScrollView>
@@ -1061,17 +1059,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.textPrimary,
   },
-  disclaimerBanner: {
-    backgroundColor: 'rgba(245, 158, 11, 0.1)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(245, 158, 11, 0.2)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  disclaimerBannerText: {
-    fontSize: 11,
-    color: '#94A3B8',
-    lineHeight: 16,
+  insightsFootnote: {
+    fontSize: 10,
+    color: '#374151',
     textAlign: 'center',
+    marginTop: 12,
+    paddingHorizontal: 8,
+    lineHeight: 14,
   },
 });
