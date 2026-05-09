@@ -228,7 +228,7 @@ export default function HomeScreen() {
   }, [isTyping]);
 
   const handleSend = async (text: string) => {
-    const trimmed = text.trim();
+    const trimmed = text.trim().replace(/[\x00-\x1F\x7F]/g, '');
     if (!trimmed || !user?.id || isSendingRef.current) return;
     isSendingRef.current = true;
 

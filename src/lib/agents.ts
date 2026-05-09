@@ -211,7 +211,10 @@ export async function getDailyInsights(
     : 'Do NOT emit income_alert type insights — no income is recorded yet.';
 
   try {
-    const prompt = `You are Finni, a personal AI finance coach. Generate highly personalized financial insights for this user.
+    const prompt = `You are Finni, an AI assistant for personal finance tracking. You are NOT a licensed financial advisor.
+IMPORTANT DISCLAIMER: All suggestions are for informational purposes only and do not constitute financial, investment, or legal advice. Users should consult a qualified professional before making financial decisions.
+
+Generate highly personalized financial insights for this user.
 
 USER PROFILE:
 - Name: ${name}
@@ -268,7 +271,11 @@ Respond ONLY with a valid JSON array (no markdown):
     return insights;
   } catch (e) {
     console.error('[Agent2] Error:', e);
-    return [];
+    return [{
+      title: 'Insights unavailable',
+      description: 'Unable to load AI insights right now. Check your connection and tap Refresh to try again.',
+      type: 'tip',
+    }];
   }
 }
 
@@ -323,7 +330,10 @@ export async function getWeeklySavingsRecommendations(
   const name = profile?.name ?? 'User';
 
   try {
-    const prompt = `You are Finni, a personal AI finance coach. Suggest 3 highly practical, specific ways for this user to save money based on their spending patterns.
+    const prompt = `You are Finni, an AI assistant for personal finance tracking. You are NOT a licensed financial advisor.
+DISCLAIMER: Suggestions are for informational purposes only, not financial advice.
+
+Suggest 3 highly practical, specific ways for this user to save money based on their spending patterns.
 
 USER PROFILE:
 - Name: ${name}
@@ -358,6 +368,8 @@ Use ${currency} for all amounts. Be specific to the user's actual spending patte
     return [];
   }
 }
+
+
 
 // --- Chat agent: conversational + transaction parsing ---
 export type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string };

@@ -398,6 +398,11 @@ export default function AnalyticsScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <View style={styles.disclaimerBanner}>
+        <Text style={styles.disclaimerBannerText}>
+          ⚠️ For informational purposes only. Not financial advice. Consult a qualified professional before making financial decisions.
+        </Text>
+      </View>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -566,13 +571,6 @@ export default function AnalyticsScreen() {
               </View>
             ))}
           </View>
-        </View>
-
-        {/* Financial disclaimer */}
-        <View style={styles.disclaimer}>
-          <Text style={styles.disclaimerText}>
-            ⚠️ AI insights are for informational purposes only and do not constitute financial advice. Consult a qualified professional before making financial decisions.
-          </Text>
         </View>
 
         {/* AI Insights */}
@@ -1063,17 +1061,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.textPrimary,
   },
-  disclaimer: {
-    backgroundColor: 'rgba(245, 158, 11, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.25)',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
+  disclaimerBanner: {
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(245, 158, 11, 0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
-  disclaimerText: {
+  disclaimerBannerText: {
     fontSize: 11,
     color: '#94A3B8',
     lineHeight: 16,
+    textAlign: 'center',
   },
 });

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Modal, Linking, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Modal, Linking, Alert, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '../lib/supabase';
 
 const PRIVACY_URL = 'https://www.heyfinni.com/privacy-policy';
 const DATA_DELETION_URL = 'https://www.heyfinni.com/data-deletion';
@@ -32,6 +33,7 @@ export default function SettingsScreen() {
   const [editProfileVisible, setEditProfileVisible] = useState(false);
   const [currencyModalVisible, setCurrencyModalVisible] = useState(false);
   const [incomeModalVisible, setIncomeModalVisible] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const handleSignOut = async () => {
     try {
@@ -39,6 +41,54 @@ export default function SettingsScreen() {
     } catch (error) {
       console.warn('Sign out failed:', error);
     }
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account & Data',
+      'This will permanently delete your account, all transactions, income records, goals, and categories. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Permanently',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              'Are you absolutely sure?',
+              'Type "DELETE" to confirm — this action is irreversible.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Yes, Delete Everything',
+                  style: 'destructive',
+                  onPress: async () => {
+                    if (!user?.id) return;
+                    setDeletingAccount(true);
+                    try {
+                      await Promise.all([
+                        supabase.from('transactions').delete().eq('user_id', user.id),
+                        supabase.from('categories').delete().eq('user_id', user.id),
+                        supabase.from('financial_goals').delete().eq('user_id', user.id),
+                        supabase.from('income').delete().eq('user_id', user.id),
+                      ]);
+                      await supabase.from('profiles').delete().eq('id', user.id);
+                      const keys = await AsyncStorage.getAllKeys();
+                      const appKeys = keys.filter((k) => k.includes(user.id));
+                      if (appKeys.length) await AsyncStorage.multiRemove(appKeys);
+                      await signOut();
+                    } catch (e) {
+                      console.error('[Settings] Delete account error:', e);
+                      setDeletingAccount(false);
+                      Alert.alert('Error', 'Could not delete account. Please contact support@heyfinni.com');
+                    }
+                  },
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
   };
 
   const handleClearCache = () => {
@@ -114,9 +164,21 @@ export default function SettingsScreen() {
 
         <Section title="Legal & Support">
           <SettingItem label="Privacy Policy" onPress={() => Linking.openURL(PRIVACY_URL)} />
-          <SettingItem label="Request Data Deletion" onPress={() => Linking.openURL(DATA_DELETION_URL)} />
           <SettingItem label="Contact Support" onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}`)} />
           <SettingItem label="Clear Cached Data" onPress={handleClearCache} />
+        </Section>
+
+        <Section title="Danger Zone">
+          <TouchableOpacity
+            style={[styles.item, { borderColor: '#EF4444' }]}
+            onPress={handleDeleteAccount}
+            activeOpacity={0.7}
+            disabled={deletingAccount}
+          >
+            {deletingAccount
+              ? <ActivityIndicator size="small" color="#EF4444" />
+              : <Text style={[styles.itemText, { color: '#EF4444' }]}>Delete Account & All Data</Text>}
+          </TouchableOpacity>
         </Section>
 
         <View style={{ paddingHorizontal: 4, marginBottom: 16 }}>
