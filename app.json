@@ -19,7 +19,7 @@
     "scheme": "finni-app",
     "newArchEnabled": true,
     "android": {
-      "package": "com.farhankabir1111.finni",
+      "package": "com.finni.app",
       "versionCode": 2,
       "permissions": [
         "android.permission.INTERNET",
