@@ -30,6 +30,9 @@ yarn-error.*
 .DS_Store
 *.pem
 
+# local credentials — contains keystore passwords
+credentials.json
+
 # local env files — NEVER commit real secrets
 .env
 .env.local
