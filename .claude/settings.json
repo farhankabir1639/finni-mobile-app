@@ -11,7 +11,8 @@
       "Bash(ls -la node_modules/.cache)",
       "Bash(ls -la .expo)",
       "Read(//c/Users/Administrator/.claude/projects/c--Users-Administrator-finni-mobile-app/**)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit -m 'feat: image transaction extraction, icon fix, Sentry/PostHog audit *)"
     ]
   }
 }

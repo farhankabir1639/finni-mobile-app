@@ -40,7 +40,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
       if (session?.user?.id) {
         setSentryUser(session.user.id);
-        identifyUser(session.user.id, { email: session.user.email });
+        identifyUser(session.user.id, { email: session.user.email ?? '' });
       } else {
         clearSentryUser();
         resetUser();

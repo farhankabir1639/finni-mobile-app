@@ -11,14 +11,18 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
+  Alert,
+  ActionSheetIOS,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfile } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
-import { chatAgent } from '../lib/agents';
+import { chatAgent, extractTransactionsFromImage, checkImageTxLimit, markImageTxUsed } from '../lib/agents';
 import { seedDefaultCategories } from '../lib/seedCategories';
 import { captureError } from '../lib/sentry';
 import { trackEvent, trackScreen } from '../lib/analytics';
@@ -84,6 +88,7 @@ export default function HomeScreen() {
   const [showHistory, setShowHistory] = useState(false);
   const [historySessions, setHistorySessions] = useState<ChatSession[]>([]);
   const [activeSessionDate, setActiveSessionDate] = useState<string | null>(null);
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const welcomeAddedRef = useRef(false);
   const isSendingRef = useRef(false);
@@ -283,6 +288,108 @@ export default function HomeScreen() {
     }
   };
 
+  const handleImagePick = async (useCamera: boolean) => {
+    if (!user?.id || isProcessingImage || isSendingRef.current) return;
+
+    const used = await checkImageTxLimit(user.id);
+    if (used) {
+      Alert.alert('Daily limit reached', 'You can scan 1 image per day. Come back tomorrow!');
+      return;
+    }
+
+    const permission = useCamera
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permission.granted) {
+      Alert.alert('Permission required', useCamera ? 'Camera access is needed to take photos.' : 'Photo library access is needed to upload images.');
+      return;
+    }
+
+    const result = useCamera
+      ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.7 })
+      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
+
+    if (result.canceled || !result.assets?.[0]) return;
+
+    setIsProcessingImage(true);
+    isSendingRef.current = true;
+
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: '📷 Scanning image for transactions...',
+      timestamp: new Date().toISOString(),
+    };
+    setMessages((m) => [...m, userMsg]);
+    setIsTyping(true);
+
+    try {
+      // Compress to max 1024px and get base64
+      const compressed = await ImageManipulator.manipulateAsync(
+        result.assets[0].uri,
+        [{ resize: { width: 1024 } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+      );
+
+      if (!compressed.base64) throw new Error('Failed to process image');
+
+      const extraction = await extractTransactionsFromImage(
+        compressed.base64,
+        'image/jpeg',
+        user.id,
+        chatContext.profile?.currency ?? 'USD'
+      );
+
+      await markImageTxUsed(user.id);
+
+      const aiMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: extraction.summary,
+        timestamp: new Date().toISOString(),
+      };
+
+      const updatedMessages = [...messages, userMsg, aiMsg];
+      setMessages(updatedMessages);
+      saveSession(user.id, updatedMessages as SessionMessage[]);
+
+      if (extraction.savedCount > 0) {
+        fetchStats();
+        fetchChatContext();
+        trackEvent('image_transactions_logged', { count: extraction.savedCount });
+      }
+    } catch (e) {
+      captureError(e, { context: 'handleImagePick', userId: user.id });
+      const errMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: "I couldn't process that image. Please try again with a clearer photo. 🔄",
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((m) => [...m, errMsg]);
+    } finally {
+      setIsTyping(false);
+      setIsProcessingImage(false);
+      isSendingRef.current = false;
+    }
+  };
+
+  const showImageOptions = () => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options: ['Cancel', 'Take Photo', 'Choose from Library'], cancelButtonIndex: 0 },
+        (i) => { if (i === 1) handleImagePick(true); else if (i === 2) handleImagePick(false); }
+      );
+    } else {
+      Alert.alert('Scan Transactions', 'Choose an option', [
+        { text: 'Take Photo', onPress: () => handleImagePick(true) },
+        { text: 'Choose from Library', onPress: () => handleImagePick(false) },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+    }
+  };
+
   const handleChipPress = (chip: string) => {
     const text = chip.replace(/^[^\s]+\s/, '').trim();
     handleSend(text);
@@ -444,6 +551,14 @@ export default function HomeScreen() {
 
         {/* BOTTOM INPUT BAR - fixed */}
         <View style={styles.inputBar}>
+          <TouchableOpacity
+            style={[styles.cameraButton, (isTyping || isProcessingImage) && styles.sendDisabled]}
+            onPress={showImageOptions}
+            disabled={isTyping || isProcessingImage}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.cameraIcon}>📷</Text>
+          </TouchableOpacity>
           <TextInput
             style={styles.input}
             placeholder="Message Finni..."
@@ -453,12 +568,12 @@ export default function HomeScreen() {
             onSubmitEditing={() => handleSend(inputText)}
             multiline
             maxLength={500}
-            editable={!isTyping}
+            editable={!isTyping && !isProcessingImage}
           />
           <TouchableOpacity
             style={[styles.sendButton, !inputText.trim() && styles.sendDisabled]}
             onPress={() => handleSend(inputText)}
-            disabled={!inputText.trim()}
+            disabled={!inputText.trim() || isProcessingImage}
             activeOpacity={0.8}
           >
             <Text style={styles.sendIcon}>➤</Text>
@@ -688,6 +803,16 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: colors.textPrimary,
     fontWeight: '700',
+  },
+  cameraButton: {
+    width: 40,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 4,
+  },
+  cameraIcon: {
+    fontSize: 22,
   },
   headerIcons: {
     flexDirection: 'row',

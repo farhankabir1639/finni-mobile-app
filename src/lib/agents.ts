@@ -1039,6 +1039,163 @@ Current user message: ${userMessage}`;
   }
 }
 
+// --- Agent 4: Extract transactions from image ---
+
+const IMAGE_TX_LIMIT_KEY = (userId: string, date: string) => `image_tx_used_${userId}_${date}`;
+
+export async function checkImageTxLimit(userId: string): Promise<boolean> {
+  const today = new Date().toISOString().split('T')[0];
+  const val = await AsyncStorage.getItem(IMAGE_TX_LIMIT_KEY(userId, today));
+  return val === 'true';
+}
+
+export async function markImageTxUsed(userId: string): Promise<void> {
+  const today = new Date().toISOString().split('T')[0];
+  await AsyncStorage.setItem(IMAGE_TX_LIMIT_KEY(userId, today), 'true');
+}
+
+export type ImageTransaction = {
+  description: string;
+  amount: number;
+  type: 'expense' | 'income';
+  category?: string;
+};
+
+export type ImageExtractionResult = {
+  transactions: ImageTransaction[];
+  summary: string;
+  savedCount: number;
+};
+
+export async function extractTransactionsFromImage(
+  base64Image: string,
+  mimeType: string,
+  userId: string,
+  currency: string = 'USD'
+): Promise<ImageExtractionResult> {
+  if (!GEMINI_API_KEY) throw new Error('Gemini API key is not configured');
+
+  const prompt = `You are a financial transaction extractor. Analyze this image (it could be a receipt, bank statement, transaction history screenshot, or any financial document) and extract ALL transactions visible.
+
+Return ONLY a valid JSON array with this exact format (no markdown, no extra text):
+[
+  {
+    "description": "item or merchant name",
+    "amount": 25.50,
+    "type": "expense",
+    "category": "Food"
+  }
+]
+
+Rules:
+- type must be "expense" or "income"
+- amount must be a positive number
+- category should be one of: Food, Transport, Shopping, Entertainment, Health, Bills, Education, Travel, Other
+- If no transactions found, return empty array []
+- Extract every single transaction visible, not just one`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            role: 'user',
+            parts: [
+              { text: prompt },
+              { inlineData: { mimeType, data: base64Image } },
+            ],
+          }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
+        }),
+        signal: controller.signal,
+      }
+    );
+    clearTimeout(timeoutId);
+
+    if (!res.ok) throw new Error(`Gemini API error: ${res.status}`);
+    const data = await res.json();
+    const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+
+    let parsed: ImageTransaction[] = [];
+    try {
+      const jsonMatch = raw.match(/\[[\s\S]*\]/);
+      if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
+    } catch {
+      parsed = [];
+    }
+
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return { transactions: [], summary: "I couldn't find any transactions in that image. Try a clearer photo of a receipt or statement.", savedCount: 0 };
+    }
+
+    // Validate and sanitize each transaction
+    const valid = parsed.filter(
+      (t) => t.description && typeof t.amount === 'number' && t.amount > 0 && t.amount < 1_000_000
+    );
+
+    if (valid.length === 0) {
+      return { transactions: [], summary: "I found some data but couldn't parse valid transactions. Try a clearer image.", savedCount: 0 };
+    }
+
+    // Fetch user categories for matching
+    const { data: userCategories } = await supabase
+      .from('categories')
+      .select('id, name')
+      .eq('user_id', userId);
+
+    const categoryMap: Record<string, string> = {};
+    (userCategories ?? []).forEach((c: { id: string; name: string }) => {
+      categoryMap[c.name.toLowerCase()] = c.id;
+    });
+
+    // Insert all transactions
+    const currencySymbol = getCurrencySymbol(currency);
+    let savedCount = 0;
+    const lines: string[] = [];
+
+    for (const tx of valid) {
+      const catName = tx.category ?? 'Other';
+      const catId = categoryMap[catName.toLowerCase()] ?? categoryMap['other'] ?? null;
+      const type = tx.type === 'income' ? 'income' : 'expense';
+
+      const { error } = await supabase.from('transactions').insert({
+        user_id: userId,
+        withdrawal: type === 'expense' ? tx.amount : 0,
+        deposit: type === 'income' ? tx.amount : 0,
+        balance: 0,
+        given_to: tx.description,
+        description: tx.description,
+        type,
+        date: new Date().toISOString(),
+        matching_score: 80,
+        ...(catId ? { category_id: catId } : {}),
+      });
+
+      if (!error) {
+        savedCount++;
+        const sign = type === 'income' ? '+' : '-';
+        lines.push(`• ${tx.description}: ${sign}${currencySymbol}${tx.amount.toFixed(2)} (${catName})`);
+      }
+    }
+
+    const summary = savedCount === 0
+      ? "I found transactions but couldn't save them. Please try again."
+      : `Got it! I found and logged ${savedCount} transaction${savedCount > 1 ? 's' : ''} from your image:\n\n${lines.join('\n')}`;
+
+    return { transactions: valid, summary, savedCount };
+  } catch (e) {
+    clearTimeout(timeoutId);
+    captureError(e, { context: 'extractTransactionsFromImage', userId });
+    throw e;
+  }
+}
+
 // --- Cache clearing for manual refresh ---
 export async function clearAgentCache(userId: string): Promise<void> {
   const keys = await AsyncStorage.getAllKeys();
