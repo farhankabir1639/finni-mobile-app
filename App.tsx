@@ -9,8 +9,10 @@ import { ProfileProvider } from './src/contexts/ProfileContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import { colors } from './src/lib/theme';
 import { initSentry } from './src/lib/sentry';
+import { initAnalytics } from './src/lib/analytics';
 
 initSentry();
+initAnalytics();
 
 type ErrorBoundaryState = { hasError: boolean; message: string };
 

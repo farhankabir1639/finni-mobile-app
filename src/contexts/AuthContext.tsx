@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
-import { setSentryUser, clearSentryUser } from '../lib/sentry';
+import { setSentryUser, clearSentryUser, captureError } from '../lib/sentry';
+import { identifyUser, resetUser, trackEvent } from '../lib/analytics';
 
 const hasSupabaseConfig = !!(
   process.env.EXPO_PUBLIC_SUPABASE_URL &&
@@ -37,8 +38,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
-      if (session?.user?.id) setSentryUser(session.user.id);
-      else clearSentryUser();
+      if (session?.user?.id) {
+        setSentryUser(session.user.id);
+        identifyUser(session.user.id, { email: session.user.email });
+      } else {
+        clearSentryUser();
+        resetUser();
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -69,6 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { error: null };
     } catch (err) {
       console.error('[AuthContext] signUp exception', err);
+      captureError(err, { context: 'signUp' });
       return { error: err instanceof Error ? err : new Error(String(err)) };
     }
   };

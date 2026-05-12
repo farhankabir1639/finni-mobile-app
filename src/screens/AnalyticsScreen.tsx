@@ -26,6 +26,8 @@ import {
   type DailyInsight,
   type SavingsRecommendation,
 } from '../lib/agents';
+import { captureError } from '../lib/sentry';
+import { trackScreen } from '../lib/analytics';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -219,6 +221,7 @@ export default function AnalyticsScreen() {
       );
     } catch (e) {
       console.error('[Analytics] Insights error:', e);
+      captureError(e, { context: 'fetchInsights', userId: user?.id });
       setInsightsError('Failed to load insights. Tap Refresh to try again.');
       setShowRefreshButton(true);
     } finally {

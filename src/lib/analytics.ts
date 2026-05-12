@@ -1,0 +1,28 @@
+import PostHog from 'posthog-react-native';
+
+let client: PostHog | null = null;
+
+export function initAnalytics() {
+  const key = process.env.EXPO_PUBLIC_POSTHOG_API_KEY;
+  if (!key) return;
+  client = new PostHog(key, {
+    host: 'https://us.i.posthog.com',
+    disabled: __DEV__,
+  });
+}
+
+export function identifyUser(userId: string, traits?: Record<string, unknown>) {
+  client?.identify(userId, traits);
+}
+
+export function resetUser() {
+  client?.reset();
+}
+
+export function trackEvent(event: string, properties?: Record<string, unknown>) {
+  client?.capture(event, properties);
+}
+
+export function trackScreen(screen: string) {
+  client?.screen(screen);
+}

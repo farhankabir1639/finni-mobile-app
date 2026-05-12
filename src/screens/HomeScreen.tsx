@@ -20,6 +20,8 @@ import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import { chatAgent } from '../lib/agents';
 import { seedDefaultCategories } from '../lib/seedCategories';
+import { captureError } from '../lib/sentry';
+import { trackEvent, trackScreen } from '../lib/analytics';
 import {
   loadTodaySession,
   saveSession,
@@ -95,10 +97,10 @@ export default function HomeScreen() {
         supabase.from('transactions').select('withdrawal, deposit, description, category_id, date, type').eq('user_id', user.id).order('date', { ascending: false }).limit(10),
         supabase.from('financial_goals').select('name, target_amount, current_amount').eq('user_id', user.id),
       ]);
-      if (profileRes.error) console.error('[HomeScreen] Profile fetch error:', profileRes.error);
-      if (categoriesRes.error) console.error('[HomeScreen] Categories fetch error:', categoriesRes.error);
-      if (txRes.error) console.error('[HomeScreen] Transactions fetch error:', txRes.error);
-      if (goalsRes.error) console.error('[HomeScreen] Goals fetch error:', goalsRes.error);
+      if (profileRes.error) { console.error('[HomeScreen] Profile fetch error:', profileRes.error); captureError(profileRes.error, { context: 'fetchChatContext.profile' }); }
+      if (categoriesRes.error) { console.error('[HomeScreen] Categories fetch error:', categoriesRes.error); captureError(categoriesRes.error, { context: 'fetchChatContext.categories' }); }
+      if (txRes.error) { console.error('[HomeScreen] Transactions fetch error:', txRes.error); captureError(txRes.error, { context: 'fetchChatContext.transactions' }); }
+      if (goalsRes.error) { console.error('[HomeScreen] Goals fetch error:', goalsRes.error); captureError(goalsRes.error, { context: 'fetchChatContext.goals' }); }
       setChatContext({
         profile: profileRes.data ? { name: profileRes.data.name, currency: profileRes.data.currency } : null,
         categories: (categoriesRes.data as { id: string; name: string; emoji?: string; budget?: number; spent?: number }[]) ?? [],
@@ -107,6 +109,7 @@ export default function HomeScreen() {
       });
     } catch (e) {
       console.error('[HomeScreen] fetchChatContext error:', e);
+      captureError(e, { context: 'fetchChatContext' });
       setChatContext({});
     }
   }, [user?.id]);
@@ -151,6 +154,7 @@ export default function HomeScreen() {
       setBudgetLeft(Math.max(0, base - monthTotal));
     } catch (e) {
       console.error('[HomeScreen] fetchStats error:', e);
+      captureError(e, { context: 'fetchStats' });
     }
   }, [user?.id]);
 
@@ -262,8 +266,11 @@ export default function HomeScreen() {
       if (transaction) {
         fetchStats();
         fetchChatContext();
+        trackEvent('transaction_logged', { category: transaction.category, amount: transaction.amount });
       }
-    } catch {
+      trackEvent('chat_message_sent');
+    } catch (e) {
+      captureError(e, { context: 'handleSend', userId: user?.id });
       setIsTyping(false);
       const errMsg: Message = {
         id: (Date.now() + 1).toString(),

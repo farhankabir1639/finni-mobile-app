@@ -10,7 +10,6 @@ export function initSentry() {
     enabled: !__DEV__,
     tracesSampleRate: 0.2,
     beforeSend(event) {
-      // Strip any PII from breadcrumbs
       if (event.breadcrumbs?.values) {
         event.breadcrumbs.values = event.breadcrumbs.values.map((b) => ({
           ...b,
@@ -31,6 +30,13 @@ export function clearSentryUser() {
 }
 
 export function captureError(error: unknown, context?: Record<string, unknown>) {
+  if (__DEV__) return;
   if (context) Sentry.setContext('extra', context);
   Sentry.captureException(error);
+}
+
+export function captureMessage(message: string, level: Sentry.SeverityLevel = 'warning', context?: Record<string, unknown>) {
+  if (__DEV__) return;
+  if (context) Sentry.setContext('extra', context);
+  Sentry.captureMessage(message, level);
 }

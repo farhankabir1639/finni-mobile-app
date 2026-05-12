@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
+import { captureError } from '../lib/sentry';
 
 export const CURRENCIES = [
   { code: 'USD', symbol: '$', name: 'US Dollar' },
@@ -84,6 +85,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (e) {
       console.error('[ProfileContext] refreshProfile error:', e);
+      captureError(e, { context: 'refreshProfile', userId: user?.id });
       setProfile({ ...defaultProfile, onboardingComplete: false });
     } finally {
       setProfileLoading(false);

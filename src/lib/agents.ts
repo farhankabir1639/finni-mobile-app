@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
+import { captureError } from './sentry';
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$', BDT: '৳', EUR: '€', GBP: '£', AUD: 'A$', CAD: 'C$', SGD: 'S$', INR: '₹',
@@ -271,6 +272,7 @@ Respond ONLY with a valid JSON array (no markdown):
     return insights;
   } catch (e) {
     console.error('[Agent2] Error:', e);
+    captureError(e, { context: 'getDailyInsights', userId });
     return [{
       title: 'Insights unavailable',
       description: 'Unable to load AI insights right now. Check your connection and tap Refresh to try again.',
@@ -365,6 +367,7 @@ Use ${currency} for all amounts. Be specific to the user's actual spending patte
     return localizedResults;
   } catch (e) {
     console.error('[Agent3] Error:', e);
+    captureError(e, { context: 'getWeeklySavingsRecommendations', userId });
     return [];
   }
 }
@@ -1021,6 +1024,7 @@ Current user message: ${userMessage}`;
     return { response: finalResponse, transaction: null };
   } catch (e) {
     console.error('[Agent1] chatAgent Error:', e);
+    captureError(e, { context: 'chatAgent', userId });
     const msg = e instanceof Error ? e.message : '';
     if (msg.includes('503') || msg.includes('high demand')) {
       return { response: "Gemini is a bit busy right now. Retrying automatically failed — please try again in a few seconds. 🔄", transaction: null };
