@@ -1067,6 +1067,8 @@ export type ImageExtractionResult = {
   savedCount: number;
 };
 
+const MAX_IMAGE_BASE64_BYTES = 15 * 1024 * 1024; // 15MB base64 limit
+
 export async function extractTransactionsFromImage(
   base64Image: string,
   mimeType: string,
@@ -1074,6 +1076,10 @@ export async function extractTransactionsFromImage(
   currency: string = 'USD'
 ): Promise<ImageExtractionResult> {
   if (!GEMINI_API_KEY) throw new Error('Gemini API key is not configured');
+
+  if (base64Image.length > MAX_IMAGE_BASE64_BYTES) {
+    return { transactions: [], summary: "That image is too large to process. Please use a smaller or clearer photo.", savedCount: 0 };
+  }
 
   const prompt = `You are a financial transaction extractor. Analyze this image (it could be a receipt, bank statement, transaction history screenshot, or any financial document) and extract ALL transactions visible.
 
@@ -1134,10 +1140,10 @@ Rules:
       return { transactions: [], summary: "I couldn't find any transactions in that image. Try a clearer photo of a receipt or statement.", savedCount: 0 };
     }
 
-    // Validate and sanitize each transaction
-    const valid = parsed.filter(
-      (t) => t.description && typeof t.amount === 'number' && t.amount > 0 && t.amount < 1_000_000
-    );
+    // Validate and sanitize — coerce amount to number since Gemini sometimes returns strings
+    const valid = parsed
+      .map((t) => ({ ...t, amount: Number(t.amount) }))
+      .filter((t) => t.description && !isNaN(t.amount) && t.amount > 0 && t.amount < 1_000_000);
 
     if (valid.length === 0) {
       return { transactions: [], summary: "I found some data but couldn't parse valid transactions. Try a clearer image.", savedCount: 0 };

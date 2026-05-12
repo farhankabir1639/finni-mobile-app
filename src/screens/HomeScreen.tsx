@@ -312,6 +312,9 @@ export default function HomeScreen() {
 
     if (result.canceled || !result.assets?.[0]) return;
 
+    // Mark daily limit immediately to prevent double-submission race condition
+    await markImageTxUsed(user.id);
+
     setIsProcessingImage(true);
     isSendingRef.current = true;
 
@@ -325,7 +328,7 @@ export default function HomeScreen() {
     setIsTyping(true);
 
     try {
-      // Compress to max 1024px and get base64
+      // Compress to max 1024px wide, JPEG 0.7 quality
       const compressed = await ImageManipulator.manipulateAsync(
         result.assets[0].uri,
         [{ resize: { width: 1024 } }],
@@ -340,8 +343,6 @@ export default function HomeScreen() {
         user.id,
         chatContext.profile?.currency ?? 'USD'
       );
-
-      await markImageTxUsed(user.id);
 
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
