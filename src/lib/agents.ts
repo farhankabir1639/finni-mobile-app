@@ -9,6 +9,27 @@ function getCurrencySymbol(code?: string | null): string {
   return CURRENCY_SYMBOLS[code ?? 'USD'] ?? code ?? '$';
 }
 
+function resolveCategoryFuzzy(
+  catName: string,
+  userCategories: { id: string; name: string }[]
+): string | null {
+  if (!catName || !userCategories.length) return null;
+  const needle = catName.toLowerCase();
+  const scored = userCategories.map((c) => {
+    const hay = c.name.toLowerCase();
+    let score = 0;
+    if (hay === needle) score = 1.0;
+    else if (hay.includes(needle) || needle.includes(hay)) score = 0.85;
+    else {
+      const overlap = [...needle].filter((ch) => hay.includes(ch)).length;
+      score = overlap / Math.max(needle.length, hay.length);
+    }
+    return { ...c, score };
+  });
+  const best = scored.sort((a, b) => b.score - a.score)[0];
+  return best && best.score >= 0.7 ? best.id : null;
+}
+
 const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
 const GEMINI_MODEL = 'gemini-2.5-flash-lite';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
@@ -17,13 +38,16 @@ if (!GEMINI_API_KEY) {
   console.error('[Agent] EXPO_PUBLIC_GEMINI_API_KEY is not configured. All AI features will fail.');
 }
 
-function getWeekNumber(): number {
+function getYearWeekKey(): string {
   const now = new Date();
   const start = new Date(now.getFullYear(), 0, 1);
-  return Math.ceil((((now.getTime() - start.getTime()) / 86400000) + start.getDay() + 1) / 7);
+  const week = Math.ceil((((now.getTime() - start.getTime()) / 86400000) + start.getDay() + 1) / 7);
+  return `${now.getFullYear()}_w${week}`;
 }
 
 const RETRY_DELAYS = [1500, 3000, 5000];
+
+const _insightsInFlight = new Map<string, Promise<DailyInsight[]>>();
 
 async function callGemini(prompt: string, retryCount = 0): Promise<string> {
   return callGeminiWithHistory([{ role: 'user', parts: [{ text: prompt }] }], retryCount);
@@ -56,15 +80,27 @@ async function callGeminiWithHistory(
         await new Promise((r) => setTimeout(r, delay));
         return callGeminiWithHistory(contents, retryCount + 1);
       }
+      const errBody = await res.json().catch(() => ({}));
+      const errMsg = (errBody as any)?.error?.message ?? '';
+      console.error(`[Gemini] ${status} error body:`, JSON.stringify(errBody));
       if (status === 503) throw new Error('Gemini is experiencing high demand. Please try again in a moment.');
       if (status === 429) throw new Error('Rate limit reached. Please wait a moment before trying again.');
-      if (status === 400) throw new Error('Gemini API error: 400');
-      throw new Error(`Gemini API error: ${status}`);
+      if (status === 403) throw new Error(`Gemini API key error (403): ${errMsg || 'Check API key permissions and billing in Google Cloud Console'}`);
+      if (status === 400) throw new Error(`Gemini API error: 400 - ${errMsg}`);
+      throw new Error(`Gemini API error: ${status} - ${errMsg}`);
     }
     const data = await res.json();
     console.log('[Agent1] Gemini data:', JSON.stringify(data).slice(0, 200));
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) throw new Error('Empty Gemini response');
+    if (!text) {
+      if (retryCount < 2) {
+        const delay = RETRY_DELAYS[retryCount];
+        console.log(`[Gemini] Empty response, retrying in ${delay}ms (attempt ${retryCount + 1}/2)`);
+        await new Promise((r) => setTimeout(r, delay));
+        return callGeminiWithHistory(contents, retryCount + 1);
+      }
+      throw new Error('Empty Gemini response');
+    }
     return text;
   } catch (e) {
     clearTimeout(timeoutId);
@@ -139,13 +175,17 @@ export async function getDailyInsights(
   const cached = await AsyncStorage.getItem(cacheKey);
   if (cached) return JSON.parse(cached);
 
+  // Dedup concurrent calls with same cache key
+  const inFlight = _insightsInFlight.get(cacheKey);
+  if (inFlight) return inFlight;
+
   const realTransactions = (transactions ?? []).filter((t) => {
     const amount = t.type === 'expense' ? (Number(t.withdrawal) || 0) : (Number(t.deposit) || 0);
     const desc = (t.description ?? '').trim();
     return amount > 0 && desc.length >= 2 && (t.type === 'expense' || t.type === 'income');
   });
 
-  const MIN_TRANSACTIONS = 50;
+  const MIN_TRANSACTIONS = 10;
   if (realTransactions.length < MIN_TRANSACTIONS) {
     return [{
       title: 'Building your insights...',
@@ -154,65 +194,65 @@ export async function getDailyInsights(
     }];
   }
 
-  const totalSpent = transactions
-    .filter((t) => t.type === 'expense')
-    .reduce((sum, t) => sum + (Number(t.withdrawal) || 0), 0);
-  const totalIncome = transactions
-    .filter((t) => t.type === 'income')
-    .reduce((sum, t) => sum + (Number(t.deposit) || 0), 0);
+  const computePromise = (async (): Promise<DailyInsight[]> => {
+    const totalSpent = transactions
+      .filter((t) => t.type === 'expense')
+      .reduce((sum, t) => sum + (Number(t.withdrawal) || 0), 0);
+    const totalIncome = transactions
+      .filter((t) => t.type === 'income')
+      .reduce((sum, t) => sum + (Number(t.deposit) || 0), 0);
 
-  const normalized = transactions.slice(0, 50).map((t) => ({
-    ...t,
-    amount: t.type === 'expense' ? (Number(t.withdrawal) || 0) : (Number(t.deposit) || 0),
-  }));
+    const normalized = transactions.slice(0, 50).map((t) => ({
+      ...t,
+      amount: t.type === 'expense' ? (Number(t.withdrawal) || 0) : (Number(t.deposit) || 0),
+    }));
 
-  // Fetch enriched context
-  const [profileRes, goalsRes, incomeRes, catRes] = await Promise.all([
-    supabase.from('profiles').select('name, currency').eq('id', userId).maybeSingle(),
-    supabase.from('financial_goals').select('name, target_amount, current_amount, goal_type, status').eq('user_id', userId),
-    supabase.from('income').select('label, amount, frequency').eq('user_id', userId),
-    supabase.from('categories').select('name, budget, spent').eq('user_id', userId),
-  ]);
+    const [profileRes, goalsRes, incomeRes, catRes] = await Promise.all([
+      supabase.from('profiles').select('name, currency').eq('id', userId).maybeSingle(),
+      supabase.from('financial_goals').select('name, target_amount, current_amount, goal_type, status').eq('user_id', userId),
+      supabase.from('income').select('label, amount, frequency').eq('user_id', userId),
+      supabase.from('categories').select('name, budget, spent').eq('user_id', userId),
+    ]);
 
-  const profile = profileRes.data as { name?: string; currency?: string } | null;
-  const goals = (goalsRes.data ?? []) as { name: string; target_amount: number; current_amount: number; goal_type?: string; status?: string }[];
-  const income = (incomeRes.data ?? []) as { label: string; amount: number; frequency: string }[];
-  const catBudgets = (catRes.data ?? []) as { name: string; budget: number; spent: number }[];
+    const profile = profileRes.data as { name?: string; currency?: string } | null;
+    const goals = (goalsRes.data ?? []) as { name: string; target_amount: number; current_amount: number; goal_type?: string; status?: string }[];
+    const income = (incomeRes.data ?? []) as { label: string; amount: number; frequency: string }[];
+    const catBudgets = (catRes.data ?? []) as { name: string; budget: number; spent: number }[];
 
-  const totalMonthlyIncome = income.reduce((sum, inc) => {
-    const amt = Number(inc.amount) || 0;
-    if (inc.frequency === 'weekly') return sum + amt * 4.33;
-    if (inc.frequency === 'annual') return sum + amt / 12;
-    return sum + amt;
-  }, 0);
+    const totalMonthlyIncome = income.reduce((sum, inc) => {
+      const amt = Number(inc.amount) || 0;
+      if (inc.frequency === 'weekly') return sum + amt * (52 / 12);
+      if (inc.frequency === 'annual') return sum + amt / 12;
+      return sum + amt;
+    }, 0);
 
-  const currency = profile?.currency ?? 'USD';
-  const name = profile?.name ?? 'User';
+    const currency = profile?.currency ?? 'USD';
+    const name = profile?.name ?? 'User';
 
-  const goalsContext = goals.length
-    ? goals.map((g) => `- ${g.name}: Target ${currency} ${g.target_amount}, Current ${currency} ${g.current_amount} (${g.goal_type ?? 'saving'}, ${g.status ?? 'in_progress'})`).join('\n')
-    : 'No goals set yet.';
+    const goalsContext = goals.length
+      ? goals.map((g) => `- ${g.name}: Target ${currency} ${g.target_amount}, Current ${currency} ${g.current_amount} (${g.goal_type ?? 'saving'}, ${g.status ?? 'in_progress'})`).join('\n')
+      : 'No goals set yet.';
 
-  const categoryBudgetContext = catBudgets.filter((c) => Number(c.budget) > 0).length
-    ? catBudgets
-        .filter((c) => Number(c.budget) > 0)
-        .map((c) => {
-          const over = Number(c.spent) > Number(c.budget);
-          return `- ${c.name}: Budget ${currency} ${Number(c.budget).toFixed(2)}, Spent ${currency} ${Number(c.spent).toFixed(2)}${over ? ' ⚠ OVER BUDGET' : ''}`;
-        })
-        .join('\n')
-    : 'No category budgets set.';
+    const categoryBudgetContext = catBudgets.filter((c) => Number(c.budget) > 0).length
+      ? catBudgets
+          .filter((c) => Number(c.budget) > 0)
+          .map((c) => {
+            const over = Number(c.spent) > Number(c.budget) + 0.005;
+            return `- ${c.name}: Budget ${currency} ${Number(c.budget).toFixed(2)}, Spent ${currency} ${Number(c.spent).toFixed(2)}${over ? ' ⚠ OVER BUDGET' : ''}`;
+          })
+          .join('\n')
+      : 'No category budgets set.';
 
-  const incomeContext = income.length
-    ? income.map((i) => `- ${i.label}: ${currency} ${i.amount} ${i.frequency}`).join('\n')
-    : 'No income recorded.';
+    const incomeContext = income.length
+      ? income.map((i) => `- ${i.label}: ${currency} ${i.amount} ${i.frequency}`).join('\n')
+      : 'No income recorded.';
 
-  const incomeAlertInstruction = totalMonthlyIncome > 0
-    ? `INCOME THRESHOLD ALERT: If total monthly spending (${totalSpent.toFixed(2)} ${currency}) exceeds 80% of monthly income (${totalMonthlyIncome.toFixed(2)} ${currency}), add exactly ONE insight with type "income_alert" encouraging specific action to reduce spending or find additional income.`
-    : 'Do NOT emit income_alert type insights — no income is recorded yet.';
+    const incomeAlertInstruction = totalMonthlyIncome > 0
+      ? `INCOME THRESHOLD ALERT: If total monthly spending (${totalSpent.toFixed(2)} ${currency}) exceeds 80% of monthly income (${totalMonthlyIncome.toFixed(2)} ${currency}), add exactly ONE insight with type "income_alert" encouraging specific action to reduce spending or find additional income.`
+      : 'Do NOT emit income_alert type insights — no income is recorded yet.';
 
-  try {
-    const prompt = `You are Finni, an AI assistant for personal finance tracking. You are NOT a licensed financial advisor.
+    try {
+      const prompt = `You are Finni, an AI assistant for personal finance tracking. You are NOT a licensed financial advisor.
 IMPORTANT DISCLAIMER: All suggestions are for informational purposes only and do not constitute financial, investment, or legal advice. Users should consult a qualified professional before making financial decisions.
 
 Generate highly personalized financial insights for this user.
@@ -247,38 +287,45 @@ ${userPrompt ? `7. ADDITIONAL INSTRUCTIONS FROM USER: ${userPrompt}` : ''}
 Respond ONLY with a valid JSON array (no markdown):
 [{ "title": "...", "description": "...", "suggestion": "...", "type": "warning|tip|goal|income_alert" }]`;
 
-    const text = await callGemini(prompt);
-    const cleaned = text.replace(/```json?|```/g, '').trim();
-    let insights: DailyInsight[];
-    try {
-      insights = JSON.parse(cleaned);
-      if (!Array.isArray(insights)) insights = [];
-    } catch (parseErr) {
-      console.error('[Agent2] JSON parse Error:', parseErr);
-      insights = [];
-    }
-    await AsyncStorage.setItem(cacheKey, JSON.stringify(insights));
+      const text = await callGemini(prompt);
+      const cleaned = text.replace(/```json?|```/g, '').trim();
+      let insights: DailyInsight[];
+      try {
+        insights = JSON.parse(cleaned);
+        if (!Array.isArray(insights)) insights = [];
+      } catch (parseErr) {
+        console.error('[Agent2] JSON parse Error:', parseErr);
+        insights = [];
+      }
 
-    // Clean up stale insight cache keys from the past 7 days
-    const cleanupKeys: string[] = [];
-    for (let i = 1; i <= 7; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      cleanupKeys.push(`insights_${userId}_${dateStr}`);
-    }
-    await AsyncStorage.multiRemove(cleanupKeys);
+      if (insights.length > 0) {
+        await AsyncStorage.setItem(cacheKey, JSON.stringify(insights));
+      }
 
-    return insights;
-  } catch (e) {
-    console.error('[Agent2] Error:', e);
-    captureError(e, { context: 'getDailyInsights', userId });
-    return [{
-      title: 'Insights unavailable',
-      description: 'Unable to load AI insights right now. Check your connection and tap Refresh to try again.',
-      type: 'tip',
-    }];
-  }
+      const cleanupKeys: string[] = [];
+      for (let i = 1; i <= 7; i++) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        cleanupKeys.push(`insights_${userId}_${dateStr}`);
+      }
+      await AsyncStorage.multiRemove(cleanupKeys);
+
+      return insights;
+    } catch (e) {
+      console.error('[Agent2] Error:', e);
+      captureError(e, { context: 'getDailyInsights', userId });
+      return [{
+        title: 'Insights unavailable',
+        description: 'Unable to load AI insights right now. Check your connection and tap Refresh to try again.',
+        type: 'tip',
+      }];
+    }
+  })();
+
+  _insightsInFlight.set(cacheKey, computePromise);
+  computePromise.finally(() => _insightsInFlight.delete(cacheKey));
+  return computePromise;
 }
 
 // --- AGENT 3 + 4: Weekly savings recommendations (cached by week) ---
@@ -295,7 +342,7 @@ export async function getWeeklySavingsRecommendations(
   console.log('[Agent3] Running savings agent');
   console.log('[Agent3] Transactions:', transactions?.length);
 
-  const weekKey = `savings_${userId}_week_${getWeekNumber()}`;
+  const weekKey = `savings_${userId}_${getYearWeekKey()}`;
   const cached = await AsyncStorage.getItem(weekKey);
   if (cached) return JSON.parse(cached);
 
@@ -460,7 +507,7 @@ function extractTransactionData(text: string): {
   if (goalCreateMatch) {
     try {
       const parsed = JSON.parse(goalCreateMatch[1]);
-      if (typeof parsed.name === 'string' && typeof parsed.target_amount === 'number') {
+      if (typeof parsed.name === 'string' && typeof parsed.target_amount === 'number' && parsed.target_amount > 0) {
         goalCreate = {
           name: parsed.name,
           target_amount: parsed.target_amount,
@@ -537,7 +584,7 @@ export async function chatAgent(
     .eq('user_id', userId);
   const monthlyIncome = (incomeData ?? []).reduce((sum, r) => {
     const amt = Number(r.amount) || 0;
-    if (r.frequency === 'weekly') return sum + amt * 4.33;
+    if (r.frequency === 'weekly') return sum + amt * (52 / 12);
     if (r.frequency === 'annual') return sum + amt / 12;
     return sum + amt;
   }, 0);
@@ -810,7 +857,10 @@ Current user message: ${userMessage}`;
       }
     }
 
-    if (txData && typeof txData.amount === 'number' && txData.amount > 0 && txData.amount < 1_000_000 && (txData.type === 'expense' || txData.type === 'income')) {
+    const parsedTxAmount = typeof txData?.amount === 'number'
+      ? txData.amount
+      : parseFloat(String(txData?.amount ?? ''));
+    if (txData && !isNaN(parsedTxAmount) && parsedTxAmount > 0 && parsedTxAmount < 1_000_000 && (txData.type === 'expense' || txData.type === 'income')) {
       let categoryId = typeof txData.category_id === 'string' ? txData.category_id : null;
       let matchingScore = 0;
 
@@ -856,37 +906,51 @@ Current user message: ${userMessage}`;
             const newCatName = typeof txData.category_id === 'string' ? txData.category_id : categoryId;
             const autoEmoji = CATEGORY_EMOJI_MAP[newCatName.toLowerCase()] ?? '📦';
             console.log(`[Agent1] No match above threshold (best: ${bestMatch?.score?.toFixed(2) ?? 'n/a'}), creating category: "${newCatName}" ${autoEmoji}`);
-            const { data: newCat, error: newCatError } = await supabase
+
+            // Pre-check prevents duplicate categories from concurrent requests
+            const { data: existingByName } = await supabase
               .from('categories')
-              .insert({
-                user_id: userId,
-                name: newCatName,
-                emoji: autoEmoji,
-                budget: 0,
-                spent: 0,
-                color: '#6366F1',
-                type: 'monthly',
-              })
-              .select()
-              .single();
-            if (newCat && !newCatError) {
-              categoryId = newCat.id;
-              matchingScore = bestMatch?.score ?? 0;
-              allCategories?.push({ id: newCat.id, name: newCatName });
+              .select('id')
+              .eq('user_id', userId)
+              .ilike('name', newCatName)
+              .maybeSingle();
+
+            if (existingByName) {
+              categoryId = existingByName.id;
+              matchingScore = 0.85;
+              allCategories?.push({ id: existingByName.id, name: newCatName });
             } else {
-              // Bug 2 fix: never silently drop — always tell the user what went wrong
-              console.error('[Agent1] Auto-create category failed:', newCatError);
-              return {
-                response: "I couldn't find or create a category for this. Please add it manually in Settings → Categories.",
-                transaction: null,
-              };
+              const { data: newCat, error: newCatError } = await supabase
+                .from('categories')
+                .insert({
+                  user_id: userId,
+                  name: newCatName,
+                  emoji: autoEmoji,
+                  budget: 0,
+                  spent: 0,
+                  color: '#6366F1',
+                  type: 'monthly',
+                })
+                .select()
+                .single();
+              if (newCat && !newCatError) {
+                categoryId = newCat.id;
+                matchingScore = bestMatch?.score ?? 0;
+                allCategories?.push({ id: newCat.id, name: newCatName });
+              } else {
+                console.error('[Agent1] Auto-create category failed:', newCatError);
+                return {
+                  response: "I couldn't find or create a category for this. Please add it manually in Settings → Categories.",
+                  transaction: null,
+                };
+              }
             }
           }
         }
       }
 
       const categoryName = categoryId ? (allCategories?.find((c) => c.id === categoryId)?.name ?? null) : null;
-      const amount = Math.abs(txData.amount);
+      const amount = Math.abs(parsedTxAmount);
       const description = typeof txData.description === 'string' ? txData.description : '';
       const type = txData.type === 'income' ? 'income' : 'expense';
 
@@ -918,12 +982,15 @@ Current user message: ${userMessage}`;
       if (goalUpdate) {
         const { data: matchedGoals } = await supabase
           .from('financial_goals')
-          .select('id, current_amount, name')
+          .select('id, current_amount, target_amount, name')
           .eq('user_id', userId)
           .ilike('name', goalUpdate.goal_name);
-        const goal = matchedGoals?.[0];
+        const goal = matchedGoals?.[0] as { id: string; current_amount: number; target_amount: number; name: string } | undefined;
         if (goal) {
-          const newAmount = Number(goal.current_amount ?? 0) + goalUpdate.amount;
+          const newAmount = Math.min(
+            Number(goal.target_amount ?? Infinity),
+            Number(goal.current_amount ?? 0) + goalUpdate.amount
+          );
           const { error: goalError } = await supabase
             .from('financial_goals')
             .update({ current_amount: newAmount })
@@ -1009,9 +1076,10 @@ Current user message: ${userMessage}`;
         .ilike('name', categoryBudgetUpdate.category_name);
       const cat = matchedCats?.[0];
       if (cat) {
+        const validatedBudget = Math.max(0, Number(categoryBudgetUpdate.budget) || 0);
         const { error: cbError } = await supabase
           .from('categories')
-          .update({ budget: categoryBudgetUpdate.budget, type: 'monthly' })
+          .update({ budget: validatedBudget, type: 'monthly' })
           .eq('id', cat.id)
           .eq('user_id', userId);
         if (cbError) console.error('[Agent1] Category budget update error:', cbError);
@@ -1043,15 +1111,31 @@ Current user message: ${userMessage}`;
 
 const IMAGE_TX_LIMIT_KEY = (userId: string, date: string) => `image_tx_used_${userId}_${date}`;
 
+function getLocalDateStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 export async function checkImageTxLimit(userId: string): Promise<boolean> {
-  const today = new Date().toISOString().split('T')[0];
-  const val = await AsyncStorage.getItem(IMAGE_TX_LIMIT_KEY(userId, today));
-  return val === 'true';
+  const today = getLocalDateStr();
+  const localVal = await AsyncStorage.getItem(IMAGE_TX_LIMIT_KEY(userId, today));
+  if (localVal === 'true') return true;
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user?.user_metadata?.image_scan_date === today) {
+      await AsyncStorage.setItem(IMAGE_TX_LIMIT_KEY(userId, today), 'true');
+      return true;
+    }
+  } catch {}
+  return false;
 }
 
 export async function markImageTxUsed(userId: string): Promise<void> {
-  const today = new Date().toISOString().split('T')[0];
+  const today = getLocalDateStr();
   await AsyncStorage.setItem(IMAGE_TX_LIMIT_KEY(userId, today), 'true');
+  try {
+    await supabase.auth.updateUser({ data: { image_scan_date: today } });
+  } catch {}
 }
 
 export type ImageTransaction = {
@@ -1069,19 +1153,14 @@ export type ImageExtractionResult = {
 
 const MAX_IMAGE_BASE64_BYTES = 15 * 1024 * 1024; // 15MB base64 limit
 
-export async function extractTransactionsFromImage(
+export async function parseTransactionsFromImage(
   base64Image: string,
   mimeType: string,
-  userId: string,
-  currency: string = 'USD'
-): Promise<ImageExtractionResult> {
+): Promise<ImageTransaction[]> {
   if (!GEMINI_API_KEY) throw new Error('Gemini API key is not configured');
+  if (base64Image.length > MAX_IMAGE_BASE64_BYTES) throw new Error('IMAGE_TOO_LARGE');
 
-  if (base64Image.length > MAX_IMAGE_BASE64_BYTES) {
-    return { transactions: [], summary: "That image is too large to process. Please use a smaller or clearer photo.", savedCount: 0 };
-  }
-
-  const prompt = `You are a financial transaction extractor. Analyze this image (it could be a receipt, bank statement, transaction history screenshot, or any financial document) and extract ALL transactions visible.
+  const prompt = `You are a financial transaction extractor. Analyze this image (it could be a receipt, bank statement, transaction history screenshot, or any financial document) and extract individual line item transactions.
 
 Return ONLY a valid JSON array with this exact format (no markdown, no extra text):
 [
@@ -1098,105 +1177,138 @@ Rules:
 - amount must be a positive number
 - category should be one of: Food, Transport, Shopping, Entertainment, Health, Bills, Education, Travel, Other
 - If no transactions found, return empty array []
-- Extract every single transaction visible, not just one`;
+- Extract individual line items only — do NOT include subtotals, totals, grand totals, balance rows, or any row whose amount equals the sum of other rows on the same document
+- Delivery fees, shipping fees, and service charges associated with a purchase should use category "Shopping", not "Transport". Use "Transport" only for taxi, ride-share, bus, train, fuel, or parking
+- For receipts: extract each purchased item or service as a separate transaction; skip the final total row`;
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            role: 'user',
-            parts: [
-              { text: prompt },
-              { inlineData: { mimeType, data: base64Image } },
-            ],
-          }],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
-        }),
-        signal: controller.signal,
+  const fetchWithRetry = async (): Promise<Response> => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt - 1]));
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 30000);
+      try {
+        const r = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ role: 'user', parts: [{ text: prompt }, { inlineData: { mimeType, data: base64Image } }] }],
+              generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
+            }),
+            signal: ctrl.signal,
+          }
+        );
+        clearTimeout(tid);
+        if (r.status !== 429 && r.status !== 503) return r;
+        console.log(`[ImageAgent] ${r.status} error, retrying (attempt ${attempt + 1}/3)`);
+      } catch (e) {
+        clearTimeout(tid);
+        if (e instanceof Error && e.name === 'AbortError') throw new Error('Gemini image request timed out');
+        throw e;
       }
-    );
-    clearTimeout(timeoutId);
-
-    if (!res.ok) throw new Error(`Gemini API error: ${res.status}`);
-    const data = await res.json();
-    const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-
-    let parsed: ImageTransaction[] = [];
-    try {
-      const jsonMatch = raw.match(/\[[\s\S]*\]/);
-      if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
-    } catch {
-      parsed = [];
     }
+    throw new Error('Gemini image API unreachable after retries');
+  };
 
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      return { transactions: [], summary: "I couldn't find any transactions in that image. Try a clearer photo of a receipt or statement.", savedCount: 0 };
-    }
+  const res = await fetchWithRetry();
+  if (!res.ok) throw new Error(`Gemini API error: ${res.status}`);
+  const data = await res.json();
+  const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 
-    // Validate and sanitize — coerce amount to number since Gemini sometimes returns strings
-    const valid = parsed
-      .map((t) => ({ ...t, amount: Number(t.amount) }))
-      .filter((t) => t.description && !isNaN(t.amount) && t.amount > 0 && t.amount < 1_000_000);
+  let parsed: ImageTransaction[] = [];
+  try {
+    const jsonMatch = raw.match(/\[[\s\S]*\]/);
+    if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
+  } catch {
+    parsed = [];
+  }
 
-    if (valid.length === 0) {
-      return { transactions: [], summary: "I found some data but couldn't parse valid transactions. Try a clearer image.", savedCount: 0 };
-    }
+  if (!Array.isArray(parsed) || parsed.length === 0) return [];
 
-    // Fetch user categories for matching
-    const { data: userCategories } = await supabase
-      .from('categories')
-      .select('id, name')
-      .eq('user_id', userId);
+  return parsed
+    .map((t) => ({ ...t, amount: Number(t.amount) }))
+    .filter((t) => t.description?.trim() && !isNaN(t.amount) && t.amount > 0 && t.amount < 1_000_000);
+}
 
-    const categoryMap: Record<string, string> = {};
-    (userCategories ?? []).forEach((c: { id: string; name: string }) => {
-      categoryMap[c.name.toLowerCase()] = c.id;
+export async function saveImageTransactions(
+  valid: ImageTransaction[],
+  userId: string,
+  currency: string = 'USD',
+  sessionDate?: string,
+): Promise<ImageExtractionResult> {
+  const { data: userCategories } = await supabase
+    .from('categories')
+    .select('id, name')
+    .eq('user_id', userId);
+
+  const categoryMap: Record<string, string> = {};
+  (userCategories ?? []).forEach((c: { id: string; name: string }) => {
+    categoryMap[c.name.toLowerCase()] = c.id;
+  });
+
+  const currencySymbol = getCurrencySymbol(currency);
+  let savedCount = 0;
+  let failCount = 0;
+  const lines: string[] = [];
+
+  for (const tx of valid) {
+    const catName = tx.category ?? 'Other';
+    const catId = resolveCategoryFuzzy(catName, userCategories ?? []) ?? categoryMap['other'] ?? null;
+    const type: 'expense' | 'income' = tx.type === 'income' ? 'income' : 'expense';
+    const txDate = sessionDate ? new Date(sessionDate).toISOString() : new Date().toISOString();
+
+    const { error } = await supabase.from('transactions').insert({
+      user_id: userId,
+      withdrawal: type === 'expense' ? tx.amount : 0,
+      deposit: type === 'income' ? tx.amount : 0,
+      balance: 0,
+      given_to: tx.description,
+      description: tx.description,
+      type,
+      date: txDate,
+      matching_score: 80,
+      ...(catId ? { category_id: catId } : {}),
     });
 
-    // Insert all transactions
-    const currencySymbol = getCurrencySymbol(currency);
-    let savedCount = 0;
-    const lines: string[] = [];
-
-    for (const tx of valid) {
-      const catName = tx.category ?? 'Other';
-      const catId = categoryMap[catName.toLowerCase()] ?? categoryMap['other'] ?? null;
-      const type = tx.type === 'income' ? 'income' : 'expense';
-
-      const { error } = await supabase.from('transactions').insert({
-        user_id: userId,
-        withdrawal: type === 'expense' ? tx.amount : 0,
-        deposit: type === 'income' ? tx.amount : 0,
-        balance: 0,
-        given_to: tx.description,
-        description: tx.description,
-        type,
-        date: new Date().toISOString(),
-        matching_score: 80,
-        ...(catId ? { category_id: catId } : {}),
-      });
-
-      if (!error) {
-        savedCount++;
-        const sign = type === 'income' ? '+' : '-';
-        lines.push(`• ${tx.description}: ${sign}${currencySymbol}${tx.amount.toFixed(2)} (${catName})`);
-      }
+    if (!error) {
+      savedCount++;
+      const sign = type === 'income' ? '+' : '-';
+      lines.push(`• ${tx.description}: ${sign}${currencySymbol}${tx.amount.toFixed(2)} (${catName})`);
+    } else {
+      failCount++;
+      console.error('[ImageAgent] Insert error:', tx.description, error);
+      captureError(error, { context: 'saveImageTransactions.insert', userId, description: tx.description });
     }
+  }
 
-    const summary = savedCount === 0
-      ? "I found transactions but couldn't save them. Please try again."
-      : `Got it! I found and logged ${savedCount} transaction${savedCount > 1 ? 's' : ''} from your image:\n\n${lines.join('\n')}`;
+  const failNote = failCount > 0
+    ? `\n\n⚠️ ${failCount} transaction${failCount > 1 ? 's' : ''} couldn't be saved — please log them manually.`
+    : '';
+  const summary = savedCount === 0
+    ? "I found transactions but couldn't save them. Please try again."
+    : `Got it! I found and logged ${savedCount} transaction${savedCount > 1 ? 's' : ''} from your image:\n\n${lines.join('\n')}${failNote}`;
 
-    return { transactions: valid, summary, savedCount };
+  return { transactions: valid, summary, savedCount };
+}
+
+export async function extractTransactionsFromImage(
+  base64Image: string,
+  mimeType: string,
+  userId: string,
+  currency: string = 'USD',
+  sessionDate?: string
+): Promise<ImageExtractionResult> {
+  if (base64Image.length > MAX_IMAGE_BASE64_BYTES) {
+    return { transactions: [], summary: "That image is too large to process. Please use a smaller or clearer photo.", savedCount: 0 };
+  }
+  try {
+    const valid = await parseTransactionsFromImage(base64Image, mimeType);
+    if (!valid.length) {
+      return { transactions: [], summary: "I couldn't find any transactions in that image. Try a clearer photo of a receipt or statement.", savedCount: 0 };
+    }
+    return saveImageTransactions(valid, userId, currency, sessionDate);
   } catch (e) {
-    clearTimeout(timeoutId);
     captureError(e, { context: 'extractTransactionsFromImage', userId });
     throw e;
   }
@@ -1204,6 +1316,7 @@ Rules:
 
 // --- Cache clearing for manual refresh ---
 export async function clearAgentCache(userId: string): Promise<void> {
+  if (!userId) return;
   const keys = await AsyncStorage.getAllKeys();
   const toRemove = keys.filter(
     (k) => k.startsWith(`insights_${userId}_`) || k.startsWith(`savings_${userId}_`)

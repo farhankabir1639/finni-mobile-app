@@ -7,6 +7,8 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
+  Pressable,
+  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,6 +16,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useProfile } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
+import { trackScreen } from '../lib/analytics';
 
 type Transaction = {
   id: string;
@@ -113,7 +116,6 @@ export default function TransactionsScreen() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterOption>('all');
-  const [monthlyIncomeTotal, setMonthlyIncomeTotal] = useState(0);
 
   const fetchTransactions = useCallback(() => {
     if (!user?.id) {
@@ -145,26 +147,33 @@ export default function TransactionsScreen() {
       });
   }, [user?.id]);
 
-  const fetchMonthlyIncome = useCallback(async () => {
-    if (!user?.id) return;
-    const { data } = await supabase
-      .from('income')
-      .select('amount, frequency')
-      .eq('user_id', user.id);
-    const total = (data ?? []).reduce((sum, r) => {
-      const amt = Number(r.amount) || 0;
-      if (r.frequency === 'weekly') return sum + amt * 4.33;
-      if (r.frequency === 'annual') return sum + amt / 12;
-      return sum + amt;
-    }, 0);
-    setMonthlyIncomeTotal(total);
-  }, [user?.id]);
+  const handleDeleteTransaction = useCallback((id: string) => {
+    Alert.alert(
+      'Delete transaction?',
+      'This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await supabase
+              .from('transactions')
+              .delete()
+              .eq('id', id)
+              .eq('user_id', user?.id ?? '');
+            if (!error) fetchTransactions();
+          },
+        },
+      ]
+    );
+  }, [user?.id, fetchTransactions]);
 
   useFocusEffect(
     React.useCallback(() => {
       fetchTransactions();
-      fetchMonthlyIncome();
-    }, [fetchTransactions, fetchMonthlyIncome])
+      trackScreen('TransactionsScreen');
+    }, [fetchTransactions])
   );
 
   const filteredAndGrouped = useMemo(() => {
@@ -217,12 +226,8 @@ export default function TransactionsScreen() {
         else income += Number(t.deposit) || 0;
       }
     }
-    // Add recurring monthly income from income table for all/month views
-    if ((filter === 'all' || filter === 'month') && monthlyIncomeTotal > 0) {
-      income += monthlyIncomeTotal;
-    }
     return { spent, income };
-  }, [filteredAndGrouped, filter, monthlyIncomeTotal]);
+  }, [filteredAndGrouped]);
 
   const filterChips: { key: FilterOption; label: string }[] = [
     { key: 'all', label: 'All' },
@@ -234,14 +239,19 @@ export default function TransactionsScreen() {
   const renderTransaction = (t: Transaction) => {
     const amt = t.type === 'expense' ? (Number(t.withdrawal) || 0) : (Number(t.deposit) || 0);
     const isExpense = t.type === 'expense';
-    const name = t.description ?? 'Transaction';
+    const name = t.description?.trim() || 'Transaction';
     const cat = t.categories ?? null;
     const categoryLabel = cat ? `${cat.emoji ?? '💰'} ${cat.name}` : 'Uncategorized';
     const emoji = cat?.emoji ?? getCategoryEmoji(cat?.name ?? null);
     const circleColor = getCategoryColor(cat?.name ?? null);
 
     return (
-      <View key={t.id} style={styles.transactionItem}>
+      <Pressable
+        key={t.id}
+        style={styles.transactionItem}
+        onLongPress={() => handleDeleteTransaction(t.id)}
+        android_ripple={{ color: 'rgba(255,255,255,0.05)' }}
+      >
         <View style={styles.transactionLeft}>
           <View style={[styles.emojiCircle, { backgroundColor: circleColor }]}>
             <Text style={styles.emojiText}>{emoji}</Text>
@@ -257,7 +267,7 @@ export default function TransactionsScreen() {
         <Text style={[styles.transactionAmount, isExpense ? styles.amountExpense : styles.amountIncome]}>
           {formatAmount(amt, isExpense, currencySymbol)}
         </Text>
-      </View>
+      </Pressable>
     );
   };
 

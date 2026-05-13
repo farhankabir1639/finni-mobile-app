@@ -14,6 +14,7 @@
       "backgroundColor": "#0A0F1E"
     },
     "ios": {
+      "bundleIdentifier": "com.finni.app",
       "supportsTablet": true
     },
     "scheme": "finni-app",
@@ -25,15 +26,14 @@
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.CAMERA",
-        "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_EXTERNAL_STORAGE"
+        "android.permission.READ_MEDIA_IMAGES"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#6366F1",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": true
     },
     "extra": {
       "eas": {
@@ -44,7 +44,14 @@
       "supportEmail": "support@heyfinni.com"
     },
     "plugins": [
-      "expo-localization"
+      "expo-localization",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Finni uses your photo library to scan receipts and extract transactions automatically.",
+          "cameraPermission": "Finni uses the camera to photograph receipts and extract transactions automatically."
+        }
+      ]
     ]
   }
 }

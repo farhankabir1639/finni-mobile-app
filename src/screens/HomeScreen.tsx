@@ -22,7 +22,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useProfile } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
-import { chatAgent, extractTransactionsFromImage, checkImageTxLimit, markImageTxUsed } from '../lib/agents';
+import { chatAgent, parseTransactionsFromImage, saveImageTransactions, checkImageTxLimit, markImageTxUsed } from '../lib/agents';
 import { seedDefaultCategories } from '../lib/seedCategories';
 import { captureError } from '../lib/sentry';
 import { trackEvent, trackScreen } from '../lib/analytics';
@@ -92,9 +92,11 @@ export default function HomeScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const welcomeAddedRef = useRef(false);
   const isSendingRef = useRef(false);
+  const isFetchingContextRef = useRef(false);
 
   const fetchChatContext = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id || isFetchingContextRef.current) return;
+    isFetchingContextRef.current = true;
     try {
       const [profileRes, categoriesRes, txRes, goalsRes] = await Promise.all([
         supabase.from('profiles').select('name, currency').eq('id', user.id).maybeSingle(),
@@ -116,6 +118,8 @@ export default function HomeScreen() {
       console.error('[HomeScreen] fetchChatContext error:', e);
       captureError(e, { context: 'fetchChatContext' });
       setChatContext({});
+    } finally {
+      isFetchingContextRef.current = false;
     }
   }, [user?.id]);
 
@@ -149,7 +153,7 @@ export default function HomeScreen() {
 
       const monthlyIncome = (incomeData ?? []).reduce((sum, r) => {
         const amt = Number(r.amount) || 0;
-        if (r.frequency === 'weekly') return sum + amt * 4.33;
+        if (r.frequency === 'weekly') return sum + amt * (52 / 12);
         if (r.frequency === 'annual') return sum + amt / 12;
         return sum + amt;
       }, 0);
@@ -166,6 +170,7 @@ export default function HomeScreen() {
   useFocusEffect(
     React.useCallback(() => {
       fetchStats();
+      trackScreen('HomeScreen');
     }, [fetchStats])
   );
 
@@ -277,6 +282,7 @@ export default function HomeScreen() {
     } catch (e) {
       captureError(e, { context: 'handleSend', userId: user?.id });
       setIsTyping(false);
+      setInputText(trimmed);
       const errMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
@@ -312,9 +318,6 @@ export default function HomeScreen() {
 
     if (result.canceled || !result.assets?.[0]) return;
 
-    // Mark daily limit immediately to prevent double-submission race condition
-    await markImageTxUsed(user.id);
-
     setIsProcessingImage(true);
     isSendingRef.current = true;
 
@@ -328,7 +331,6 @@ export default function HomeScreen() {
     setIsTyping(true);
 
     try {
-      // Compress to max 1024px wide, JPEG 0.7 quality
       const compressed = await ImageManipulator.manipulateAsync(
         result.assets[0].uri,
         [{ resize: { width: 1024 } }],
@@ -337,11 +339,50 @@ export default function HomeScreen() {
 
       if (!compressed.base64) throw new Error('Failed to process image');
 
-      const extraction = await extractTransactionsFromImage(
-        compressed.base64,
-        'image/jpeg',
+      const parsed = await parseTransactionsFromImage(compressed.base64, 'image/jpeg');
+
+      if (parsed.length === 0) {
+        const aiMsg: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: "I couldn't find any transactions in that image. Try a clearer photo of a receipt or statement.",
+          timestamp: new Date().toISOString(),
+        };
+        const updatedMessages = [...messages, userMsg, aiMsg];
+        setMessages(updatedMessages);
+        saveSession(user.id, updatedMessages as SessionMessage[], activeSessionDate ?? undefined);
+        return;
+      }
+
+      // Show confirmation before any DB writes
+      setIsTyping(false);
+      const previewLines = parsed
+        .map((t) => `• ${t.description}: ${t.type === 'income' ? '+' : '-'}${currencySymbol}${t.amount.toFixed(2)} (${t.category ?? 'Other'})`)
+        .join('\n');
+
+      const confirmed = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          `Found ${parsed.length} transaction${parsed.length > 1 ? 's' : ''}`,
+          `${previewLines}\n\nSave all to your account?`,
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Save All', onPress: () => resolve(true) },
+          ],
+          { cancelable: true, onDismiss: () => resolve(false) }
+        );
+      });
+
+      if (!confirmed) {
+        setMessages(messages);
+        return;
+      }
+
+      setIsTyping(true);
+      const extraction = await saveImageTransactions(
+        parsed,
         user.id,
-        chatContext.profile?.currency ?? 'USD'
+        chatContext.profile?.currency ?? 'USD',
+        activeSessionDate ?? undefined
       );
 
       const aiMsg: Message = {
@@ -353,9 +394,10 @@ export default function HomeScreen() {
 
       const updatedMessages = [...messages, userMsg, aiMsg];
       setMessages(updatedMessages);
-      saveSession(user.id, updatedMessages as SessionMessage[]);
+      saveSession(user.id, updatedMessages as SessionMessage[], activeSessionDate ?? undefined);
 
       if (extraction.savedCount > 0) {
+        await markImageTxUsed(user.id);
         fetchStats();
         fetchChatContext();
         trackEvent('image_transactions_logged', { count: extraction.savedCount });
@@ -433,7 +475,7 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <KeyboardAvoidingView
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         {/* TOP SECTION - fixed, not scrollable */}

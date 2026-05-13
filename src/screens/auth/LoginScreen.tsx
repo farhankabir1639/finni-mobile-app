@@ -35,7 +35,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
   const handleSignIn = async () => {
     setError(null);
     setLoading(true);
-    const { error: signInError } = await signIn(email, password);
+    const { error: signInError } = await signIn(email.trim(), password);
     setLoading(false);
     if (signInError) {
       setError(signInError.message);

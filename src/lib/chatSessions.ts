@@ -15,6 +15,7 @@ function storageKey(userId: string): string {
 }
 
 export async function loadAllSessions(userId: string): Promise<ChatSession[]> {
+  if (!userId) return [];
   try {
     const raw = await AsyncStorage.getItem(storageKey(userId));
     return raw ? JSON.parse(raw) : [];
@@ -35,7 +36,7 @@ export async function loadSessionByDate(userId: string, date: string): Promise<S
 }
 
 export async function saveSession(userId: string, messages: SessionMessage[], date?: string): Promise<void> {
-  if (!messages.length) return;
+  if (!userId || !messages.length) return;
   try {
     const sessions = await loadAllSessions(userId);
     const targetDate = date ?? todayDateStr();

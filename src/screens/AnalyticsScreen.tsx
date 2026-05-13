@@ -300,7 +300,7 @@ export default function AnalyticsScreen() {
     if (!incomeRes.error) {
       const total = (incomeRes.data ?? []).reduce((sum, r) => {
         const amt = Number(r.amount) || 0;
-        if (r.frequency === 'weekly') return sum + amt * 4.33;
+        if (r.frequency === 'weekly') return sum + amt * (52 / 12);
         if (r.frequency === 'annual') return sum + amt / 12;
         return sum + amt;
       }, 0);
@@ -311,12 +311,13 @@ export default function AnalyticsScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchAll();
+      trackScreen('AnalyticsScreen');
     }, [fetchAll])
   );
 
   // Run sync once per focus after transactions are loaded
   useEffect(() => {
-    if (transactions.length >= 50 && user?.id && !syncAttemptedRef.current) {
+    if (transactions.length >= 10 && user?.id && !syncAttemptedRef.current) {
       syncAttemptedRef.current = true;
       syncInsights();
     }
@@ -446,7 +447,7 @@ export default function AnalyticsScreen() {
             <Text style={[styles.summaryAmount, styles.summarySaved]}>
               {monthlyIncome > 0
                 ? `${currencySymbol}${(() => {
-                    if (period === 'week') return (monthlyIncome / 4.33).toFixed(2);
+                    if (period === 'week') return (monthlyIncome * 12 / 52).toFixed(2);
                     if (period === '3months') return (monthlyIncome * 3).toFixed(2);
                     if (period === 'year') return (monthlyIncome * 12).toFixed(2);
                     return monthlyIncome.toFixed(2);
@@ -572,13 +573,13 @@ export default function AnalyticsScreen() {
         </View>
 
         {/* AI Insights */}
-        {transactions.length < 50 ? (
+        {transactions.length < 10 ? (
           <View style={[styles.aiInsightCard, { borderColor: colors.border }]}>
             <Text style={[styles.aiInsightTitle, { color: colors.textSecondary }]}>📊 Insights</Text>
             <Text style={styles.aiInsightSubtitle}>
-              Finni needs at least 50 real transactions to generate accurate, personalized insights.{'\n\n'}
+              Finni needs at least 10 transactions to generate personalized insights.{'\n\n'}
               {transactions.length > 0
-                ? `You have ${transactions.length} so far — ${50 - transactions.length} more to go!`
+                ? `You have ${transactions.length} so far — ${10 - transactions.length} more to go!`
                 : 'Start by logging your first expense in the chat.'}
             </Text>
           </View>
