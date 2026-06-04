@@ -2,6 +2,18 @@
 
 > Your conversational finance companion. Log expenses, track goals, and get personalized AI insights — all through natural chat.
 
+![Version](https://img.shields.io/badge/version-1.0.0-brightgreen) ![Platform](https://img.shields.io/badge/platform-Android-blue) ![Build](https://img.shields.io/badge/build-production-success)
+
+---
+
+## Release — v1.0.0 (Production)
+
+**Released:** June 2026
+**Build:** versionCode 6 · AAB · Google Play Production
+**Package:** `com.finni.app`
+
+First public production release. Available on the Google Play Store.
+
 ---
 
 ## Overview
@@ -15,6 +27,7 @@ Built for an Android-first launch targeting Bangladesh and emerging markets.
 ## Features
 
 - 💬 **Conversational expense logging** — log transactions in natural language
+- 📸 **Image-based transaction extraction** — photograph receipts to auto-extract transactions
 - 🧠 **AI category matching** — automatically maps expenses to categories with 70% similarity threshold
 - 📊 **Analytics dashboard** — pie chart, monthly trends, spending breakdowns
 - 🤖 **Personalized AI insights** — daily coaching based on income, goals, location, and spending patterns
@@ -23,6 +36,8 @@ Built for an Android-first launch targeting Bangladesh and emerging markets.
 - 🌍 **Multi-currency support** — USD, BDT, EUR, GBP, AUD, CAD, SGD, INR
 - 🚀 **Onboarding flow** — 3-step conversational onboarding
 - ⚙️ **Settings** — categories, goals, income, profile, currency
+- 🔒 **Error monitoring** — Sentry integration for crash reporting
+- 📈 **Product analytics** — PostHog integration for usage insights
 
 ---
 
@@ -36,6 +51,8 @@ Built for an Android-first launch targeting Bangladesh and emerging markets.
 | Build system | EAS Build |
 | Language | TypeScript |
 | Navigation | React Navigation |
+| Error tracking | Sentry |
+| Analytics | PostHog |
 
 ---
 
@@ -51,11 +68,8 @@ Built for an Android-first launch targeting Bangladesh and emerging markets.
 ### Installation
 
 ```bash
-# Clone the repo
-git clone https://github.com/MicroFinanace/finni-mobile-app-v2.git
-cd finni-mobile-app-v2
-
-# Install dependencies
+git clone https://github.com/farhankabir1639/finni-mobile-app.git
+cd finni-mobile-app
 npm install
 ```
 
@@ -67,11 +81,14 @@ Create a `.env` file at the project root:
 EXPO_PUBLIC_SUPABASE_URL=your_supabase_url
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 EXPO_PUBLIC_GEMINI_API_KEY=your_gemini_api_key
+EXPO_PUBLIC_SENTRY_DSN=your_sentry_dsn
+EXPO_PUBLIC_POSTHOG_API_KEY=your_posthog_key
 ```
 
-Get these values from:
-- Supabase: dashboard → Settings → Data API
-- Gemini: aistudio.google.com → API Keys
+- **Supabase:** dashboard → Settings → Data API
+- **Gemini:** aistudio.google.com → API Keys
+- **Sentry:** sentry.io → Project → Settings → Client Keys
+- **PostHog:** app.posthog.com → Project → Settings
 
 ### Run Locally
 
@@ -85,15 +102,14 @@ npx expo start --clear
 ## Building
 
 ```bash
-# Preview APK (for testing)
+# Preview APK (internal testing)
 eas build --platform android --profile preview
 
-# Production AAB (for Google Play)
+# Production AAB (Google Play)
 eas build --platform android --profile production
 ```
 
-> EAS Secrets must be configured for `EXPO_PUBLIC_GEMINI_API_KEY` before building.
-> Set with: `eas secret:create --scope project --name EXPO_PUBLIC_GEMINI_API_KEY --value your_key`
+The production profile uses `credentialsSource: local` — ensure `credentials.json` and the keystore file are present before building.
 
 ---
 
@@ -132,7 +148,9 @@ finni-mobile-app/
 │   │   ├── supabase.ts   # Supabase client
 │   │   └── seedCategories.ts
 │   └── navigation/       # App navigator
+├── assets/               # Icons, splash screen
 ├── .env                  # Local env vars (gitignored)
+├── credentials.json      # Local keystore config (gitignored)
 ├── eas.json              # EAS build config
 ├── app.json              # Expo config
 └── README.md
@@ -146,9 +164,10 @@ Finni uses a multi-agent system powered by Gemini:
 
 | Agent | Role |
 |-------|------|
-| **Agent 1 (chatAgent)** | Parses user messages, matches categories, logs transactions |
-| **Agent 2 (getDailyInsights)** | Generates daily spending insights |
-| **Agent 3 (getSavingsRecommendations)** | Weekly savings tips |
+| **chatAgent** | Parses user messages, matches categories, logs transactions |
+| **imageExtractionAgent** | Extracts transactions from receipt photos |
+| **getDailyInsights** | Generates daily spending insights |
+| **getSavingsRecommendations** | Weekly savings tips |
 
 ### Category Matching Logic
 1. Fetch all user categories from Supabase
@@ -164,17 +183,21 @@ Finni uses a multi-agent system powered by Gemini:
 - Supabase anon key is public by design — protected by RLS policies
 - Gemini API key stored as EAS Secret — never committed to git
 - All tables have RLS enabled — users can only access their own data
+- Sentry and PostHog used for observability only — no PII transmitted
 - No sensitive data logged in production
 
 ---
 
 ## Deployment
 
-The app is deployed to Google Play Store under closed testing.
-
-- **Package name:** `com.farhankabir1111.finni`
-- **Target market:** Bangladesh (Android-first)
-- **Min SDK:** Android API 34+
+| Field | Value |
+|-------|-------|
+| Store | Google Play Store |
+| Package | `com.finni.app` |
+| Version | 1.0.0 (versionCode 6) |
+| Target market | Bangladesh (Android-first) |
+| Distribution | Production |
+| Build type | AAB (Android App Bundle) |
 
 ---
 

@@ -304,13 +304,12 @@ export default function HomeScreen() {
       return;
     }
 
-    const permission = useCamera
-      ? await ImagePicker.requestCameraPermissionsAsync()
-      : await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-    if (!permission.granted) {
-      Alert.alert('Permission required', useCamera ? 'Camera access is needed to take photos.' : 'Photo library access is needed to upload images.');
-      return;
+    if (useCamera) {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission required', 'Camera access is needed to take photos.');
+        return;
+      }
     }
 
     const result = useCamera
