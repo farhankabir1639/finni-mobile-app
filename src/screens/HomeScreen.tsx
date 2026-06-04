@@ -13,6 +13,7 @@ import {
   Modal,
   Alert,
   ActionSheetIOS,
+  Linking,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -418,6 +419,28 @@ export default function HomeScreen() {
     }
   };
 
+  const handleReportMessage = (msg: Message) => {
+    Alert.alert(
+      'Report AI Response',
+      'Flag this response as inappropriate, inaccurate, or offensive. This helps us improve Finni.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Report',
+          style: 'destructive',
+          onPress: () => {
+            const subject = encodeURIComponent('Finni AI Response Report');
+            const body = encodeURIComponent(
+              `I'd like to report the following AI-generated response:\n\n"${msg.content}"\n\nReason: [Please describe the issue]\n\nTimestamp: ${msg.timestamp ?? 'N/A'}`
+            );
+            Linking.openURL(`mailto:support@heyfinni.com?subject=${subject}&body=${body}`);
+            Alert.alert('Thank you', 'Your report helps us improve Finni.');
+          },
+        },
+      ]
+    );
+  };
+
   const showImageOptions = () => {
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
@@ -541,9 +564,16 @@ export default function HomeScreen() {
                   <View style={styles.assistantBubble}>
                     <Text style={styles.bubbleText}>{msg.content}</Text>
                   </View>
-                  {msg.timestamp && (
-                    <Text style={styles.messageTime}>{formatMessageTime(msg.timestamp)}</Text>
-                  )}
+                  <View style={styles.assistantMeta}>
+                    {msg.timestamp && (
+                      <Text style={styles.messageTime}>{formatMessageTime(msg.timestamp)}</Text>
+                    )}
+                    {msg.id !== 'welcome' && (
+                      <TouchableOpacity onPress={() => handleReportMessage(msg)} hitSlop={8}>
+                        <Text style={styles.reportText}>Report</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </View>
               </View>
             ) : (
@@ -953,10 +983,20 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.textSecondary,
   },
+  assistantMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 3,
+    marginLeft: 4,
+    gap: 8,
+  },
+  reportText: {
+    fontSize: 10,
+    color: colors.textSecondary,
+    opacity: 0.7,
+  },
   messageTime: {
     fontSize: 10,
     color: colors.textSecondary,
-    marginTop: 3,
-    marginLeft: 4,
   },
 });
