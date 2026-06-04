@@ -1,0 +1,1478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Zelos — Your Personal 360° AI Health, Fitness &amp; Nutrition Coach</title>
+<meta name="description" content="Zelos is a personal AI health coach that connects your nutrition, fitness, sleep, and mood to reveal patterns and personalize your physical and mental wellbeing. Coming soon to Android and iOS." />
+<meta property="og:title" content="Zelos — Your Personal 360° AI Health, Fitness &amp; Nutrition Coach" />
+<meta property="og:description" content="Zelos is a personal AI health coach that connects your nutrition, fitness, sleep, and mood to reveal patterns and personalize your physical and mental wellbeing. Coming soon to Android and iOS." />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Zelos — Your Personal 360° AI Health, Fitness &amp; Nutrition Coach" />
+<meta name="twitter:description" content="Zelos is a personal AI health coach that connects your nutrition, fitness, sleep, and mood to reveal patterns and personalize your physical and mental wellbeing. Coming soon to Android and iOS." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Manrope:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0A0B0F;
+    --bg-2: #0E1016;
+    --ink: #ECEEF3;
+    --ink-soft: #9BA1AE;
+    --ink-faint: #5C616E;
+    --hairline: rgba(255, 255, 255, 0.10);
+    --hairline-soft: rgba(255, 255, 255, 0.06);
+    --peri: oklch(0.72 0.13 274);
+    --mint: oklch(0.82 0.11 165);
+    --glass: rgba(255, 255, 255, 0.035);
+    --glass-2: rgba(255, 255, 255, 0.06);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Manrope', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+  body.booting { overflow: hidden; height: 100vh; }
+
+  .mono {
+    font-family: 'Space Mono', monospace;
+    letter-spacing: 0.04em;
+  }
+
+  /* ── Ambient grain + glow ─────────────────────────────────── */
+  .field {
+    position: fixed; inset: -50px; z-index: 0; pointer-events: none; will-change: transform;
+  }
+  .field .glow {
+    position: absolute; border-radius: 50%;
+    filter: blur(90px); opacity: 0.55; mix-blend-mode: screen;
+  }
+  .g-peri {
+    width: 50vw; height: 50vw; min-width: 480px; min-height: 480px;
+    left: 8%; top: -8%;
+    background: radial-gradient(circle, rgba(126,141,235,0.55), transparent 68%);
+    animation: float1 30s ease-in-out infinite alternate;
+  }
+  .g-mint {
+    width: 42vw; height: 42vw; min-width: 420px; min-height: 420px;
+    right: 4%; top: 22%;
+    background: radial-gradient(circle, rgba(120,224,186,0.40), transparent 68%);
+    animation: float2 36s ease-in-out infinite alternate;
+  }
+  @keyframes float1 { to { transform: translate(6vw, 7vh) scale(1.12); } }
+  @keyframes float2 { to { transform: translate(-5vw, -6vh) scale(0.92); } }
+
+  .grid-lines {
+    position: fixed; inset: -50px; z-index: 0; pointer-events: none; opacity: 0.5; will-change: transform;
+    background-image:
+      linear-gradient(var(--hairline-soft) 1px, transparent 1px),
+      linear-gradient(90deg, var(--hairline-soft) 1px, transparent 1px);
+    background-size: 100% 100%, 120px 100%;
+    -webkit-mask-image: radial-gradient(120% 80% at 50% 0%, #000 30%, transparent 80%);
+            mask-image: radial-gradient(120% 80% at 50% 0%, #000 30%, transparent 80%);
+  }
+
+  /* ── Boot sequence ────────────────────────────────────────── */
+  .boot {
+    position: fixed; inset: 0; z-index: 999;
+    background: var(--bg);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 0; cursor: pointer;
+    transition: opacity 0.9s ease, visibility 0.9s ease;
+  }
+  .boot.done { opacity: 0; visibility: hidden; }
+  .boot-tag {
+    font-size: 11px; letter-spacing: 0.4em; text-transform: uppercase;
+    color: var(--ink-faint); margin-bottom: 36px;
+  }
+  .boot-word {
+    font-family: 'Space Grotesk', sans-serif; font-weight: 600;
+    font-size: clamp(56px, 13vw, 132px); letter-spacing: -0.04em;
+    line-height: 1; color: var(--ink);
+    position: relative;
+  }
+  .boot-count {
+    font-size: 13px; color: var(--peri); margin-top: 34px; letter-spacing: 0.3em;
+  }
+  .boot-bar {
+    margin-top: 16px; width: min(280px, 64vw); height: 1px;
+    background: var(--hairline); position: relative; overflow: hidden;
+  }
+  .boot-bar i {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 0%;
+    background: linear-gradient(90deg, var(--peri), var(--mint));
+  }
+  .boot-hint {
+    position: absolute; bottom: 38px; font-size: 11px; letter-spacing: 0.3em;
+    text-transform: uppercase; color: var(--ink-faint);
+    animation: blink 2.4s ease-in-out infinite;
+  }
+  @keyframes blink { 0%,100% { opacity: 0.3; } 50% { opacity: 0.9; } }
+
+  /* ── Shell ────────────────────────────────────────────────── */
+  .wrap { position: relative; z-index: 2; }
+
+  .topbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 22px 30px;
+    font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--ink-soft);
+    mix-blend-mode: difference;
+  }
+  .topbar .brand { font-family: 'Space Grotesk', sans-serif; font-weight: 600; letter-spacing: 0.04em; font-size: 15px; text-transform: none; color: #fff; }
+
+  /* ── Hero ─────────────────────────────────────────────────── */
+  .hero {
+    min-height: 100vh; display: grid;
+    grid-template-columns: 1.02fr 0.98fr; align-items: center; gap: 56px;
+    max-width: 1240px; margin: 0 auto;
+    padding: 120px 48px 90px; position: relative; text-align: left;
+  }
+  .hero-copy { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+  .hero-figure { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px; min-width: 0; }
+  .hero-eyebrow {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-size: 11px; letter-spacing: 0.32em; text-transform: uppercase;
+    color: var(--ink-soft); margin-bottom: 32px;
+  }
+  .hero-eyebrow .pip { width: 6px; height: 6px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 12px var(--mint); }
+  .hero-word {
+    font-family: 'Space Grotesk', sans-serif; font-weight: 600;
+    font-size: clamp(58px, 9vw, 124px); line-height: 0.9;
+    letter-spacing: -0.05em;
+    color: #EEF0F6;
+    text-shadow: 0 1px 40px rgba(126,141,235,0.18);
+    box-sizing: content-box; padding: 0 0.12em 0 0; overflow: visible;
+    position: relative;
+  }
+  .hero-word .sheen {
+    position: absolute; left: 0; top: 0; padding: inherit;
+    pointer-events: none; color: transparent;
+    background: linear-gradient(100deg, transparent 40%, rgba(255,255,255,0.9) 50%, transparent 60%);
+    background-size: 250% 100%; background-repeat: no-repeat;
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    animation: sheen 7.5s ease-in-out 1.5s infinite;
+  }
+  @keyframes sheen { 0% { background-position: 170% 0; } 16%, 100% { background-position: -90% 0; } }
+  .hero-tagline {
+    font-family: 'Space Grotesk', sans-serif; font-weight: 400;
+    font-size: clamp(20px, 3.4vw, 30px); letter-spacing: -0.01em;
+    color: var(--ink); margin-top: 30px; text-wrap: balance;
+  }
+  .hero-sub {
+    max-width: 480px; margin: 22px 0 0; font-size: clamp(15px, 2.1vw, 17px);
+    line-height: 1.6; color: var(--ink-soft); text-wrap: pretty;
+  }
+  .hero-meta {
+    display: flex; gap: 16px 26px; flex-wrap: wrap;
+    font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .hero-meta span { display: inline-flex; align-items: center; gap: 9px; }
+  .hero-meta .dot { width: 4px; height: 4px; border-radius: 50%; background: var(--peri); }
+
+  /* ── Scroll cue — FIX: position:fixed so it's always at viewport bottom,
+       centered independently of the hero grid layout.
+       JS hides it after user scrolls past the hero. ─────────── */
+  .scroll-cue {
+    position: fixed;
+    bottom: 36px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--ink-faint);
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    z-index: 40;
+    opacity: 0;
+    /* fade-in only after the hero reveal is done */
+    animation: scFadeIn 0.8s ease 3.4s forwards;
+    transition: opacity 0.6s ease;
+    pointer-events: none;
+  }
+  .scroll-cue.hidden { opacity: 0 !important; }
+  .scroll-cue .line { width: 1px; height: 46px; background: linear-gradient(var(--ink-faint), transparent); }
+  @keyframes scFadeIn { to { opacity: 1; } }
+
+  /* keep hero content above the ambient orbit */
+  .hero-eyebrow, .hero-word, .hero-tagline, .hero-sub, .hero-meta { position: relative; z-index: 2; }
+
+  /* ── 360° signal orbit (brand figure) ────────────────────── */
+  .hero-orbit {
+    position: relative; width: min(440px, 100%); height: auto; aspect-ratio: 1 / 1;
+    pointer-events: none; opacity: 0;
+  }
+  body.entered .hero-orbit { opacity: 0.78; transition: opacity 1.8s ease 0.5s; }
+  .orbit-rings circle { fill: none; stroke: rgba(255,255,255,0.13); }
+  .orbit-poly { fill: none; stroke: rgba(255,255,255,0.10); stroke-width: 1; }
+  .orbit-spin { transform-box: fill-box; transform-origin: center; animation: orbitSpin 54s linear infinite; }
+  @keyframes orbitSpin { to { transform: rotate(360deg); } }
+  .orbit-node-dot.peri { fill: var(--peri); }
+  .orbit-node-dot.mint { fill: var(--mint); }
+  .orbit-node-glow.peri { fill: var(--peri); }
+  .orbit-node-glow.mint { fill: var(--mint); }
+  .orbit-node-glow { opacity: 0.22; }
+  .orbit-node { transform-box: fill-box; transform-origin: center; }
+  .orbit-core-ring { fill: none; stroke: var(--peri); stroke-width: 1; opacity: 0.4; transform-box: fill-box; transform-origin: center; animation: corePulse 6s ease-in-out infinite; }
+  .orbit-core-dot { fill: var(--mint); transform-box: fill-box; transform-origin: center; animation: coreBreathe 6s ease-in-out infinite; }
+  .orbit-core-glow { fill: var(--mint); opacity: 0.2; transform-box: fill-box; transform-origin: center; animation: coreBreathe 6s ease-in-out infinite; }
+  @keyframes corePulse { 0%, 100% { opacity: 0.18; transform: scale(0.9); } 50% { opacity: 0.5; transform: scale(1.18); } }
+  @keyframes coreBreathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.14); } }
+  @media (max-width: 700px) { body.entered .hero-orbit { opacity: 0.5; } }
+
+  /* reveal-on-enter — base state is VISIBLE (failsafe); JS hides then
+     animates in via the Web Animations API, which has no transition race. */
+  .enter { opacity: 1; transform: none; }
+
+  /* ── Section scaffolding ──────────────────────────────────── */
+  .label {
+    font-size: 11px; letter-spacing: 0.28em; text-transform: uppercase; color: var(--peri);
+    display: inline-flex; align-items: center; gap: 12px;
+  }
+  .label::before { content: ""; width: 26px; height: 1px; background: var(--peri); opacity: 0.6; }
+  h2.big {
+    font-family: 'Space Grotesk', sans-serif; font-weight: 600;
+    font-size: clamp(30px, 5.2vw, 60px); line-height: 1.02; letter-spacing: -0.035em;
+    color: var(--ink); text-wrap: balance;
+  }
+
+  /* ── Feature explorer (scroll-driven) ────────────────────── */
+  .explorer { position: relative; z-index: 2; }
+  .exp-sticky {
+    position: sticky; top: 0; height: 100vh;
+    display: grid; grid-template-columns: 1fr 1fr; align-items: center;
+    gap: 40px; max-width: 1180px; margin: 0 auto; padding: 0 40px;
+    overflow: hidden; /* FIX: prevent progress indicator from spilling outside */
+  }
+  .exp-left {
+    max-width: 460px;
+    /* FIX: flex column so progress indicator stays pinned below the list */
+    display: flex; flex-direction: column;
+  }
+  .exp-intro { margin-bottom: 40px; flex: none; }
+  .exp-intro h2 { margin-top: 18px; }
+  .exp-list { display: flex; flex-direction: column; gap: 4px; flex: 1; min-height: 0; }
+  .exp-item {
+    border-top: 1px solid var(--hairline-soft);
+    padding: 18px 0; display: flex; gap: 18px; align-items: flex-start;
+    opacity: 0.4; transition: opacity 0.5s ease, padding 0.5s ease;
+    cursor: pointer;
+    /* FIX: ensure items render above the progress bar */
+    position: relative; z-index: 2;
+  }
+  .exp-item:last-child { border-bottom: 1px solid var(--hairline-soft); }
+  .exp-item .num { font-family: 'Space Mono', monospace; font-size: 12px; color: var(--ink-faint); padding-top: 4px; letter-spacing: 0.1em; transition: color 0.5s ease; }
+  .exp-item .body h3 {
+    font-family: 'Space Grotesk', sans-serif; font-weight: 500; font-size: 20px;
+    letter-spacing: -0.01em; color: var(--ink); margin-bottom: 6px;
+  }
+  .exp-item .body p { font-size: 14px; line-height: 1.55; color: var(--ink-soft); max-height: 0; overflow: hidden; opacity: 0; transition: max-height 0.5s ease, opacity 0.5s ease, margin 0.5s ease; }
+  .exp-item.active { opacity: 1; }
+  .exp-item.active .num { color: var(--mint); }
+  .exp-item.active .body p { max-height: 80px; opacity: 1; margin-top: 2px; }
+
+  /* phone mock */
+  .exp-right { display: flex; justify-content: center; align-items: center; }
+  .phone {
+    width: 320px; height: 650px; border-radius: 42px; position: relative;
+    background: linear-gradient(160deg, #15171F, #0C0D12);
+    border: 1px solid var(--hairline);
+    box-shadow: 0 40px 120px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.02) inset;
+    padding: 14px; overflow: hidden;
+  }
+  .phone::before {
+    content: ""; position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+    width: 110px; height: 26px; background: #06070A; border-radius: 0 0 16px 16px; z-index: 5;
+  }
+  .phone-screen {
+    width: 100%; height: 100%; border-radius: 30px; overflow: hidden;
+    background:
+      radial-gradient(80% 50% at 50% 0%, rgba(126,141,235,0.16), transparent 70%),
+      #0B0C11;
+    display: flex; flex-direction: column;
+    position: relative;
+  }
+  .ph-status {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 16px 22px 0; font-size: 12px; color: var(--ink-soft);
+    font-family: 'Space Mono', monospace;
+  }
+  .ph-head {
+    display: flex; align-items: center; gap: 11px; padding: 22px 22px 16px;
+    border-bottom: 1px solid var(--hairline-soft);
+  }
+  .ph-avatar {
+    width: 34px; height: 34px; border-radius: 50%; flex: none;
+    background: conic-gradient(from 200deg, var(--peri), var(--mint), var(--peri));
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 15px; color: #0A0B0F;
+  }
+  .ph-head .nm { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 15px; color: #fff; }
+  .ph-head .st { font-size: 11px; color: var(--mint); letter-spacing: 0.04em; }
+  .ph-body { flex: 1; padding: 22px; display: flex; flex-direction: column; gap: 16px; }
+  .ph-eyebrow { font-family: 'Space Mono', monospace; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--peri); }
+  .ph-bubble {
+    background: var(--glass-2); border: 1px solid var(--hairline-soft);
+    border-radius: 16px 16px 16px 5px; padding: 16px 17px;
+    font-size: 14.5px; line-height: 1.5; color: var(--ink);
+  }
+  .ph-metric {
+    border: 1px solid var(--hairline-soft); border-radius: 14px; padding: 15px 16px;
+    background: rgba(255,255,255,0.02);
+  }
+  .ph-metric .mlabel { font-family: 'Space Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); display: flex; justify-content: space-between; }
+  .ph-metric .mval { color: var(--mint); }
+  .ph-spark { margin-top: 10px; width: 100%; height: 46px; display: block; }
+  .ph-cta { margin-top: auto; }
+  .ph-pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    border: 1px solid var(--hairline); border-radius: 100px; padding: 9px 15px;
+    font-size: 12.5px; color: var(--ink);
+  }
+  .ph-pill .a { color: var(--peri); }
+  .ph-fade { transition: opacity 0.4s ease, transform 0.4s ease; }
+  .ph-fade.swap { opacity: 0; transform: translateY(8px); }
+
+  /* phone — typing indicator */
+  .ph-typing { display: flex; gap: 6px; align-items: center; height: 0; opacity: 0; overflow: hidden; transition: opacity .25s ease; }
+  .ph-typing.show { height: auto; opacity: 1; padding: 4px 0 2px; }
+  .ph-typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-soft); animation: typeBounce 1.2s ease-in-out infinite; }
+  .ph-typing i:nth-child(2) { animation-delay: .18s; }
+  .ph-typing i:nth-child(3) { animation-delay: .36s; }
+  @keyframes typeBounce { 0%, 80%, 100% { transform: translateY(0); opacity: .35; } 40% { transform: translateY(-5px); opacity: 1; } }
+
+  /* phone — analyzing status dot */
+  .ph-head .st .d2dot { color: var(--mint); display: inline-block; animation: stPulse 1.8s ease-in-out infinite; }
+  @keyframes stPulse { 0%, 100% { opacity: .4; } 50% { opacity: 1; } }
+
+  /* phone — sparkline area fill */
+  #phArea { opacity: 0; }
+
+  /* FIX: exp-progress — sits below the list at a lower z-index so it
+     never overlaps the last step's expanded text. */
+  .exp-progress {
+    display: flex; gap: 7px; margin-top: 20px; flex: none;
+    position: relative; z-index: 1;
+  }
+  .exp-progress i { width: 26px; height: 2px; background: var(--hairline); border-radius: 2px; transition: background 0.4s ease; }
+  .exp-progress i.on { background: var(--mint); }
+
+  .exp-steps .exp-step { height: 100vh; }
+
+  /* ── Manifesto band ───────────────────────────────────────── */
+  .band {
+    position: relative; z-index: 2; padding: 160px 24px; text-align: center;
+  }
+  .band .inner { max-width: 900px; margin: 0 auto; }
+  .band h2 {
+    font-family: 'Space Grotesk', sans-serif; font-weight: 600;
+    font-size: clamp(34px, 6.4vw, 88px); line-height: 0.98; letter-spacing: -0.04em;
+    color: var(--ink); text-wrap: balance;
+  }
+  .band h2 .dim { color: var(--ink-faint); }
+  .band p { margin-top: 34px; font-size: clamp(16px, 2.3vw, 19px); line-height: 1.6; color: var(--ink-soft); max-width: 560px; margin-left: auto; margin-right: auto; text-wrap: pretty; }
+
+  /* manifesto — word mask reveal */
+  .mask-head { line-height: 1.06; }
+  .mask-head.sr { opacity: 1; transform: none; }
+  .mask-head .w { display: inline-block; overflow: hidden; vertical-align: top; padding-bottom: .14em; margin-bottom: -.14em; }
+  .mask-head .w > span { display: inline-block; transform: translateY(120%); transition: transform 1s cubic-bezier(.22,1,.36,1); }
+  .mask-head.in .w > span { transform: none; }
+  .mask-head .w:nth-child(1) > span { transition-delay: .04s; }
+  .mask-head .w:nth-child(2) > span { transition-delay: .12s; }
+  .mask-head .w:nth-child(3) > span { transition-delay: .20s; }
+  .mask-head .w:nth-child(4) > span { transition-delay: .28s; }
+
+  /* ── Stat strip ───────────────────────────────────────────── */
+  .stats {
+    position: relative; z-index: 2; max-width: 1180px; margin: 0 auto; padding: 0 40px 40px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+    background: var(--hairline-soft); border: 1px solid var(--hairline-soft); border-radius: 20px; overflow: hidden;
+  }
+  .stat { background: var(--bg); padding: 40px 32px; }
+  .stat .k { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: clamp(34px, 5vw, 52px); letter-spacing: -0.03em; color: var(--ink); }
+  .stat .k .u { color: var(--peri); }
+  .stat .d { margin-top: 10px; font-size: 13.5px; line-height: 1.5; color: var(--ink-soft); }
+
+  /* ── CTA ──────────────────────────────────────────────────── */
+  .cta {
+    position: relative; z-index: 2; padding: 170px 24px 120px; text-align: center;
+  }
+  .cta h2 {
+    font-family: 'Space Grotesk', sans-serif; font-weight: 600;
+    font-size: clamp(40px, 8vw, 110px); line-height: 0.92; letter-spacing: -0.045em;
+    color: var(--ink);
+    background: linear-gradient(180deg, #fff, #9AA0B0);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .cta p { margin-top: 26px; font-size: clamp(15px, 2.2vw, 18px); color: var(--ink-soft); }
+
+  .stores { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; margin-top: 48px; }
+  .store-btn {
+    position: relative; display: flex; align-items: center; gap: 13px;
+    padding: 13px 22px 13px 19px;
+    border: 1px solid var(--hairline); border-radius: 16px;
+    background: var(--glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    cursor: not-allowed; text-align: left; min-width: 215px; opacity: 0.85;
+    overflow: hidden;
+    transition: transform .5s cubic-bezier(.22,1,.36,1), border-color .5s ease, opacity .5s ease;
+  }
+  .store-btn:hover { transform: translateY(-3px); opacity: 1; border-color: rgba(255,255,255,0.2); }
+  .store-btn::before {
+    content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0;
+    background: radial-gradient(170px circle at var(--mx, 50%) var(--my, 50%), rgba(180,190,255,0.18), transparent 60%);
+    transition: opacity .4s ease;
+  }
+  .store-btn:hover::before { opacity: 1; }
+  .store-btn > * { position: relative; z-index: 1; }
+  .store-btn .icon { flex: none; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; color: #fff; }
+  .store-btn .icon svg { width: 100%; height: 100%; display: block; }
+  .store-text { display: flex; flex-direction: column; line-height: 1.15; }
+  .store-text .small { font-size: 10.5px; letter-spacing: 0.04em; color: var(--ink-faint); text-transform: uppercase; font-weight: 500; }
+  .store-text .big { font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 500; letter-spacing: -0.01em; color: var(--ink); }
+  .coming-badge { margin-left: auto; padding-left: 14px; font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mint); white-space: nowrap; }
+  .coming-badge::before { content: ""; position: absolute; top: 11px; bottom: 11px; width: 1px; background: var(--hairline); margin-left: -14px; }
+
+  /* ── Footer ───────────────────────────────────────────────── */
+  footer {
+    position: relative; z-index: 2; border-top: 1px solid var(--hairline-soft);
+    padding: 40px 30px; display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 16px;
+    font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-faint);
+  }
+  footer .brand { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 14px; letter-spacing: 0.02em; text-transform: none; color: var(--ink-soft); }
+  footer .mono { font-family: 'Space Mono', monospace; }
+
+  /* scroll reveal */
+  .sr { opacity: 0; transform: translateY(28px); transition: opacity 1s cubic-bezier(.22,1,.36,1), transform 1s cubic-bezier(.22,1,.36,1); }
+  .sr.in { opacity: 1; transform: none; }
+  #phPoly { transition: stroke-dashoffset .9s cubic-bezier(.22,1,.36,1); }
+
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--peri); outline-offset: 3px; border-radius: 8px; }
+
+  /* ── Premium motion layer ─────────────────────────────────── */
+  .scroll-prog {
+    position: fixed; top: 0; left: 0; height: 2px; width: 0; z-index: 60;
+    background: linear-gradient(90deg, var(--peri), var(--mint));
+    box-shadow: 0 0 12px rgba(126,141,235,0.55);
+  }
+
+  /* ── Pattern Discovery constellation ─────────────────────── */
+  .discover { position: relative; z-index: 2; padding: 120px 24px 100px; }
+  .discover .inner { max-width: 1060px; margin: 0 auto; }
+  .discover .head { max-width: 640px; margin: 0 auto 46px; text-align: center; }
+  .constellation { position: relative; width: 100%; }
+  .constellation svg { width: 100%; height: auto; display: block; overflow: visible; }
+  .cn-edge { stroke: rgba(255,255,255,0.11); stroke-width: 1; fill: none; pointer-events: none; }
+  .cn-edge.draw { transition: stroke-dashoffset 1s ease; stroke-dashoffset: 0 !important; }
+  .cn-chain { stroke: url(#cnGrad); stroke-width: 2.5; fill: none; stroke-linecap: round; filter: drop-shadow(0 0 6px rgba(126,141,235,0.45)); pointer-events: none; }
+  .cn-chain.draw { transition: stroke-dashoffset 1.3s ease .15s; stroke-dashoffset: 0 !important; }
+  .cn-node { opacity: 0; transform: scale(.6); transform-box: fill-box; transform-origin: center; }
+  .cn-node.in { opacity: 1; transform: none; transition: opacity .5s ease, transform .6s cubic-bezier(.22,1,.36,1); }
+  .cn-node .dot { fill: #0E1016; stroke: rgba(255,255,255,0.26); stroke-width: 1; transition: stroke .55s ease, stroke-width .55s ease; }
+  .cn-node.hot .dot { stroke: var(--mint); stroke-width: 1.6; }
+  .cn-node .halo { fill: var(--peri); opacity: .12; transform-box: fill-box; transform-origin: center; transition: fill .55s ease, opacity .55s ease, transform .55s cubic-bezier(.22,1,.36,1); }
+  .cn-node.hot .halo { fill: var(--mint); opacity: .22; transform: scale(1.35); }
+  .cn-label { font-family: 'Space Mono', monospace; font-size: 13px; letter-spacing: .02em; fill: var(--ink-faint); transition: fill .55s ease; }
+  .cn-node.hot .cn-label { fill: var(--ink); }
+  .cn-pulse { fill: var(--mint); opacity: 0; filter: drop-shadow(0 0 5px var(--mint)); pointer-events: none; }
+  .cn-hit { fill: transparent; pointer-events: all; cursor: pointer; }
+  .cn-node .dot, .cn-node .halo { pointer-events: none; }
+  .cn-caption { margin-top: 30px; text-align: center; font-family: 'Space Mono', monospace; font-size: 13.5px; letter-spacing: .02em; color: var(--ink-soft); min-height: 22px; padding: 0 16px; transition: color .4s ease; }
+  .cn-caption .hl { color: var(--mint); }
+  .cn-hint { margin-top: 11px; text-align: center; font-family: 'Space Mono', monospace; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); opacity: .65; }
+
+  /* constellation evidence notes */
+  .cn-stage { position: relative; }
+  .cn-notes { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+  .cn-note {
+    position: absolute; width: min(204px, 44vw); padding: 13px 15px 14px;
+    background: rgba(17,19,27,0.74); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--hairline); border-radius: 13px;
+    box-shadow: 0 16px 44px rgba(0,0,0,0.45);
+    opacity: 0; transition: opacity .45s ease, transform .5s cubic-bezier(.22,1,.36,1);
+    pointer-events: none;
+  }
+  .cn-note.above { transform: translate(-50%, calc(-100% - 20px)) translateY(8px); }
+  .cn-note.below { transform: translate(-50%, 20px) translateY(8px); }
+  .cn-note.above.show { transform: translate(-50%, calc(-100% - 20px)); }
+  .cn-note.below.show { transform: translate(-50%, 20px); }
+  .cn-note.show { opacity: 1; }
+  .cn-note .nh { font-family: 'Space Mono', monospace; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--mint); margin-bottom: 9px; display: flex; align-items: center; gap: 7px; }
+  .cn-note .nh::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 8px var(--mint); flex: none; }
+  .cn-note ul { list-style: none; display: flex; flex-direction: column; gap: 5px; }
+  .cn-note li { font-size: 12.5px; line-height: 1.32; color: var(--ink-soft); padding-left: 13px; position: relative; }
+  .cn-note li::before { content: ""; position: absolute; left: 0; top: 8px; width: 6px; height: 1px; background: var(--ink-faint); }
+  .cn-note li .src { color: var(--ink-faint); }
+
+  /* ── Day-in-balance ring ──────────────────────────────────── */
+  .balance { position: relative; z-index: 2; padding: 100px 24px 120px; }
+  .balance .inner { max-width: 980px; margin: 0 auto; }
+  .balance .head { text-align: center; max-width: 640px; margin: 0 auto 56px; }
+  .balance-grid { display: flex; gap: 70px; align-items: center; justify-content: center; flex-wrap: wrap; }
+  .ring-wrap { position: relative; width: 300px; height: 300px; flex: none; }
+  .balance-ring { width: 300px; height: 300px; display: block; }
+  .ring-track { fill: none; stroke: rgba(255,255,255,0.06); stroke-width: 12; }
+  .ring-fill { fill: none; stroke-width: 12; stroke-linecap: round; }
+  .ring-fill.go { transition: stroke-dashoffset 1.5s cubic-bezier(.22,1,.36,1); }
+  .ring-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
+  .rc-num { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 48px; letter-spacing: -.03em; color: var(--ink); line-height: 1; }
+  .rc-lab { margin-top: 7px; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-family: 'Space Mono', monospace; font-size: 8.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-faint); }
+  .rc-info { pointer-events: auto; width: 13px; height: 13px; border-radius: 50%; border: 1px solid var(--hairline); background: transparent; color: var(--ink-soft); font-family: 'Space Mono', monospace; font-size: 9px; line-height: 1; cursor: help; display: inline-flex; align-items: center; justify-content: center; padding: 0; transition: border-color .3s ease, color .3s ease; }
+  .rc-info:hover, .rc-info:focus-visible { border-color: var(--mint); color: var(--mint); }
+  .rc-tip {
+    position: absolute; left: 50%; bottom: calc(100% - 26px); width: 250px;
+    transform: translateX(-50%) translateY(8px);
+    padding: 14px 16px; background: rgba(17,19,27,0.93);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--hairline); border-radius: 12px;
+    box-shadow: 0 18px 48px rgba(0,0,0,0.5);
+    font-size: 13px; line-height: 1.5; color: var(--ink-soft); text-align: left;
+    opacity: 0; pointer-events: none; z-index: 6;
+    transition: opacity .35s ease, transform .4s cubic-bezier(.22,1,.36,1);
+  }
+  .rc-tip strong { color: var(--ink); font-weight: 600; }
+  .rc-tip::after { content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 7px solid transparent; border-top-color: rgba(17,19,27,0.93); }
+  .rc-tip.show { opacity: 1; transform: translateX(-50%); }
+  .balance-legend { list-style: none; display: flex; flex-direction: column; gap: 0; min-width: 250px; }
+  .balance-legend li { display: flex; align-items: center; gap: 14px; padding: 17px 0; border-bottom: 1px solid var(--hairline-soft); }
+  .balance-legend li:first-child { padding-top: 0; }
+  .lg-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .lg-name { font-size: 15.5px; color: var(--ink); flex: 1; }
+  .lg-val { font-family: 'Space Mono', monospace; font-size: 14px; color: var(--ink-soft); }
+  .balance-note { margin-top: 22px; display: flex; align-items: center; gap: 9px; font-family: 'Space Mono', monospace; font-size: 12px; letter-spacing: .02em; color: var(--ink-faint); }
+  .balance-note::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 8px var(--mint); flex: none; }
+
+  @media (max-width: 620px) {
+    .cn-label { font-size: 16px; }
+    .balance-grid { gap: 40px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cn-node { opacity: 1; transform: none; }
+    .cn-edge, .cn-chain { stroke-dashoffset: 0 !important; }
+    .ring-fill.go { transition: none; }
+    .enter, .sr { opacity: 1 !important; transform: none !important; }
+    .field .glow { animation: none; }
+    .orbit-spin, .orbit-core-ring, .orbit-core-dot, .orbit-core-glow { animation: none; }
+    .hero-word .sheen { animation: none; opacity: 0; }
+    .ph-typing i, .ph-head .st .d2dot { animation: none; }
+    .mask-head .w > span { transform: none !important; }
+    #phArea { opacity: 1; }
+    .scroll-cue { animation: none; opacity: 1; }
+  }
+
+  /* ── Responsive ───────────────────────────────────────────── */
+  @media (max-width: 920px) {
+    .hero { grid-template-columns: 1fr; gap: 40px; padding: 116px 28px 96px; }
+    .hero-figure { order: 2; }
+    .hero-orbit { width: min(380px, 80vw); }
+    .hero-word { font-size: clamp(64px, 18vw, 120px); }
+  }
+  @media (max-width: 900px) {
+    .exp-sticky { grid-template-columns: 1fr; height: auto; min-height: 100vh; padding-top: 100px; padding-bottom: 60px; gap: 36px; overflow: visible; }
+    .exp-right { order: -1; }
+    .phone { transform: scale(0.82); margin: -40px 0; }
+    .exp-progress { justify-content: center; }
+  }
+  @media (max-width: 540px) {
+    .stores { flex-direction: column; width: 100%; max-width: 320px; margin-left: auto; margin-right: auto; }
+    .store-btn { width: 100%; }
+    .topbar { padding: 16px 18px; }
+    .band, .cta { padding-left: 18px; padding-right: 18px; }
+  }
+</style>
+</head>
+<body class="booting">
+
+  <div class="scroll-prog" id="scrollProg" aria-hidden="true"></div>
+
+  <!-- Scroll cue — lives outside the hero grid to center freely -->
+  <div class="scroll-cue mono" id="scrollCue" aria-hidden="true">
+    <span>Scroll</span>
+    <span class="line"></span>
+  </div>
+
+  <!-- Boot -->
+  <div class="boot" id="boot" role="status" aria-label="Loading Zelos concept">
+    <div class="boot-tag mono">Zelos System</div>
+    <div class="boot-word">ZELOS</div>
+    <div class="boot-count mono"><span id="bootNum">00</span>%</div>
+    <div class="boot-bar"><i id="bootBar"></i></div>
+    <div class="boot-hint mono">Calibrating to you — tap to enter</div>
+  </div>
+
+  <!-- Ambient -->
+  <div class="field" aria-hidden="true">
+    <span class="glow g-peri"></span>
+    <span class="glow g-mint"></span>
+  </div>
+  <div class="grid-lines" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">Zelos</div>
+  </header>
+
+  <main class="wrap">
+
+    <!-- HERO -->
+    <section class="hero" aria-label="Hero">
+      <div class="hero-copy">
+        <span class="hero-eyebrow enter e1"><span class="pip"></span>360° Health Intelligence</span>
+        <h1 class="hero-word enter e2">ZELOS<span class="sheen" aria-hidden="true">ZELOS</span></h1>
+        <p class="hero-tagline enter e3">Your whole health, finally in balance.</p>
+        <p class="hero-sub enter e4">A personal coach that learns your food, training, sleep, and mood — then reveals the patterns shaping how you feel, and guides body and mind with advice built only for you.</p>
+      </div>
+      <div class="hero-figure">
+        <svg class="hero-orbit" viewBox="0 0 600 600" aria-hidden="true">
+          <g class="orbit-rings">
+            <circle cx="300" cy="300" r="150"></circle>
+            <circle cx="300" cy="300" r="230"></circle>
+            <circle cx="300" cy="300" r="292"></circle>
+          </g>
+          <g class="orbit-spin">
+            <polygon class="orbit-poly" points="462.6,462.6 137.4,462.6 137.4,137.4 462.6,137.4"></polygon>
+            <g class="orbit-node">
+              <circle class="orbit-node-glow mint" cx="462.6" cy="462.6" r="16"></circle>
+              <circle class="orbit-node-dot mint" cx="462.6" cy="462.6" r="5.5"></circle>
+            </g>
+            <g class="orbit-node">
+              <circle class="orbit-node-glow peri" cx="137.4" cy="462.6" r="16"></circle>
+              <circle class="orbit-node-dot peri" cx="137.4" cy="462.6" r="5.5"></circle>
+            </g>
+            <g class="orbit-node">
+              <circle class="orbit-node-glow mint" cx="137.4" cy="137.4" r="16"></circle>
+              <circle class="orbit-node-dot mint" cx="137.4" cy="137.4" r="5.5"></circle>
+            </g>
+            <g class="orbit-node">
+              <circle class="orbit-node-glow peri" cx="462.6" cy="137.4" r="16"></circle>
+              <circle class="orbit-node-dot peri" cx="462.6" cy="137.4" r="5.5"></circle>
+            </g>
+          </g>
+          <g class="orbit-core">
+            <circle class="orbit-core-glow" cx="300" cy="300" r="22"></circle>
+            <circle class="orbit-core-ring" cx="300" cy="300" r="34"></circle>
+            <circle class="orbit-core-dot" cx="300" cy="300" r="6"></circle>
+          </g>
+        </svg>
+        <div class="hero-meta enter e5">
+          <span class="mono"><span class="dot"></span>Nutrition</span>
+          <span class="mono"><span class="dot"></span>Fitness</span>
+          <span class="mono"><span class="dot"></span>Sleep</span>
+          <span class="mono"><span class="dot"></span>Mind</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- FEATURE EXPLORER -->
+    <section class="explorer" aria-label="What Zelos does">
+      <div class="exp-sticky">
+        <div class="exp-left">
+          <div class="exp-intro">
+            <span class="label">The Engine</span>
+            <h2 class="big">One coach,<br />the whole picture.</h2>
+          </div>
+          <div class="exp-list" id="expList">
+            <div class="exp-item active" data-i="0">
+              <span class="num">01</span>
+              <div class="body">
+                <h3>Nutrition Intelligence</h3>
+                <p>Not just calories — how food actually shapes your energy, mood, and recovery.</p>
+              </div>
+            </div>
+            <div class="exp-item" data-i="1">
+              <span class="num">02</span>
+              <div class="body">
+                <h3>Adaptive Fitness</h3>
+                <p>Training that flexes to your recovery — harder when you're ready, gentler when you're not.</p>
+              </div>
+            </div>
+            <div class="exp-item" data-i="2">
+              <span class="num">03</span>
+              <div class="body">
+                <h3>Mind &amp; Body</h3>
+                <p>See how physical habits ripple into your mind, with supportive nudges to feel clearer.</p>
+              </div>
+            </div>
+            <div class="exp-item" data-i="3">
+              <span class="num">04</span>
+              <div class="body">
+                <h3>Pattern Discovery</h3>
+                <p>Zelos links everything together to surface connections you'd never spot alone.</p>
+              </div>
+            </div>
+          </div>
+          <!-- Progress dots sit below the list, z-index: 1 so items (z-index: 2) always render above -->
+          <div class="exp-progress" aria-hidden="true">
+            <i class="on"></i><i></i><i></i><i></i>
+          </div>
+        </div>
+
+        <div class="exp-right">
+          <div class="phone" aria-hidden="true">
+            <div class="phone-screen">
+              <div class="ph-status mono"><span id="phTime">9:41</span><span>● ● ●</span></div>
+              <div class="ph-head">
+                <div class="ph-avatar">Z</div>
+                <div>
+                  <div class="nm">Zelos</div>
+                  <div class="st"><span class="d2dot">●</span> analyzing your week</div>
+                </div>
+              </div>
+              <div class="ph-body ph-fade" id="phBody">
+                <div class="ph-eyebrow" id="phEyebrow">Nutrition · insight</div>
+                <div class="ph-typing" id="phTyping" aria-hidden="true"><i></i><i></i><i></i></div>
+                <div class="ph-bubble" id="phBubble">Your 3 PM energy dips line up with lunches under 20g of protein. Want a few swaps that keep you steady?</div>
+                <div class="ph-metric">
+                  <div class="mlabel"><span id="phMlabel">Afternoon energy</span><span class="mval" id="phMval">+18%</span></div>
+                  <svg class="ph-spark" id="phSpark" viewBox="0 0 240 46" preserveAspectRatio="none" fill="none">
+                    <polygon id="phArea" points="" fill="url(#vg)"></polygon>
+                    <polyline id="phPoly" points="" stroke="url(#sg)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    <defs>
+                      <linearGradient id="sg" x1="0" y1="0" x2="240" y2="0" gradientUnits="userSpaceOnUse">
+                        <stop stop-color="#7E8DEB" /><stop offset="1" stop-color="#78E0BA" />
+                      </linearGradient>
+                      <linearGradient id="vg" x1="0" y1="0" x2="0" y2="46" gradientUnits="userSpaceOnUse">
+                        <stop stop-color="#7E8DEB" stop-opacity="0.28" /><stop offset="1" stop-color="#7E8DEB" stop-opacity="0" />
+                      </linearGradient>
+                    </defs>
+                  </svg>
+                </div>
+                <div class="ph-cta">
+                  <span class="ph-pill"><span class="a">＋</span><span id="phPill">Show me the swaps</span></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="exp-steps">
+        <div class="exp-step" data-i="0"></div>
+        <div class="exp-step" data-i="1"></div>
+        <div class="exp-step" data-i="2"></div>
+        <div class="exp-step" data-i="3"></div>
+      </div>
+    </section>
+
+    <!-- MANIFESTO -->
+    <section class="band">
+      <div class="inner">
+        <span class="label sr" style="margin-bottom:28px;">Manifesto</span>
+        <h2 class="mask-head sr"><span class="w"><span>Less</span></span> <span class="w"><span>tracking.</span></span> <span class="w dim"><span>More</span></span> <span class="w dim"><span>understanding.</span></span></h2>
+        <p class="sr">Health apps have spent a decade counting things. None of it tells you why you feel the way you do. Zelos connects the dots — and gives the answer back in plain language.</p>
+      </div>
+    </section>
+
+    <!-- PATTERN DISCOVERY -->
+    <section class="discover" aria-labelledby="discover-h">
+      <div class="inner">
+        <div class="head">
+          <span class="label sr">Pattern Discovery</span>
+          <h2 class="big sr" id="discover-h">It connects the dots you can't.</h2>
+        </div>
+        <div class="cn-stage">
+          <div class="constellation" id="constellation" aria-hidden="true"></div>
+          <div class="cn-notes" id="cnNotes"></div>
+        </div>
+        <p class="cn-caption" id="cnCaption">Scanning your signals across the last 30 days…</p>
+        <p class="cn-hint">Hover any signal to see the data behind it</p>
+      </div>
+    </section>
+
+    <!-- DAY IN BALANCE -->
+    <section class="balance" aria-labelledby="balance-h">
+      <div class="inner">
+        <div class="head">
+          <span class="label sr">The morning read</span>
+          <h2 class="big sr" id="balance-h">Your whole day, in one read.</h2>
+        </div>
+        <div class="balance-grid">
+          <div class="ring-wrap sr">
+            <svg class="balance-ring" viewBox="0 0 300 300" aria-hidden="true">
+              <circle class="ring-track" cx="150" cy="150" r="122"></circle>
+              <circle class="ring-track" cx="150" cy="150" r="100"></circle>
+              <circle class="ring-track" cx="150" cy="150" r="78"></circle>
+              <circle class="ring-track" cx="150" cy="150" r="56"></circle>
+              <circle class="ring-fill" cx="150" cy="150" r="122" data-frac="0.82" stroke="#78E0BA" transform="rotate(-90 150 150)"></circle>
+              <circle class="ring-fill" cx="150" cy="150" r="100" data-frac="0.74" stroke="#7FB0EE" transform="rotate(-90 150 150)"></circle>
+              <circle class="ring-fill" cx="150" cy="150" r="78" data-frac="0.80" stroke="#B9A9F2" transform="rotate(-90 150 150)"></circle>
+              <circle class="ring-fill" cx="150" cy="150" r="56" data-frac="0.70" stroke="#7E8DEB" transform="rotate(-90 150 150)"></circle>
+            </svg>
+            <div class="ring-center">
+              <div class="rc-num"><span id="readyNum">0</span></div>
+              <div class="rc-lab">Readiness <button type="button" class="rc-info" id="rcInfo" aria-describedby="rcTip" aria-label="How readiness is scored">i</button></div>
+            </div>
+            <div class="rc-tip" id="rcTip" role="tooltip">A single <strong>0–100</strong> score blending last night's sleep, recent movement, how well you've nourished, and your focus capacity — so you know how much to take on today, and when to ease off.</div>
+          </div>
+          <div>
+            <ul class="balance-legend sr">
+              <li><span class="lg-dot" style="background:#78E0BA"></span><span class="lg-name">Sleep</span><span class="lg-val">7h 42m</span></li>
+              <li><span class="lg-dot" style="background:#7FB0EE"></span><span class="lg-name">Movement</span><span class="lg-val">58 min active</span></li>
+              <li><span class="lg-dot" style="background:#B9A9F2"></span><span class="lg-name">Nourishment</span><span class="lg-val">On target</span></li>
+              <li><span class="lg-dot" style="background:#7E8DEB"></span><span class="lg-name">Deep focus</span><span class="lg-val">4.2 hrs</span></li>
+            </ul>
+            <div class="balance-note sr">Updated each morning from your overnight signals</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- STATS -->
+    <div class="stats">
+      <div class="stat sr"><div class="k"><span class="cup" data-to="5">0</span><span class="u">+</span></div><div class="d">Signals woven together — food, movement, sleep, activity, and mood.</div></div>
+      <div class="stat sr"><div class="k"><span class="cup" data-to="24">0</span><span class="u">/7</span></div><div class="d">Always learning quietly in the background, never asking for busywork.</div></div>
+      <div class="stat sr"><div class="k"><span class="cup" data-to="1">0</span></div><div class="d">Coach tuned entirely to you — the more it learns, the more it's yours.</div></div>
+    </div>
+
+    <!-- CTA -->
+    <section class="cta">
+      <span class="label sr" style="margin-bottom:30px;">Coming Soon</span>
+      <h2 class="sr">A coach that<br />understands you.</h2>
+      <p class="sr">Zelos arrives on Android and iOS shortly. Be ready the moment it lands.</p>
+      <div class="stores sr">
+        <button class="store-btn" type="button" aria-disabled="true" aria-label="Google Play — coming soon">
+          <span class="icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3.6 2.3a1 1 0 0 0-.5.88v17.64a1 1 0 0 0 .5.88l9.62-9.7L3.6 2.3z" fill="#5BC9F5"></path>
+              <path d="M16.9 8.36 13.22 12l3.68 3.64 3.9-2.2c.9-.51.9-1.37 0-1.88l-3.9-2.2z" fill="#FACC2E"></path>
+              <path d="M3.6 2.3 13.22 12l3.68-3.64L5.2 1.93c-.6-.34-1.2-.2-1.6.37z" fill="#3DDC84"></path>
+              <path d="M3.6 21.7c.4.57 1 .71 1.6.37l11.7-6.43L13.22 12 3.6 21.7z" fill="#F0524E"></path>
+            </svg>
+          </span>
+          <span class="store-text"><span class="small">Get it on</span><span class="big">Google Play</span></span>
+          <span class="coming-badge">Coming soon</span>
+        </button>
+        <button class="store-btn" type="button" aria-disabled="true" aria-label="App Store — coming soon">
+          <span class="icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+              <path d="M16.36 12.78c-.02-2.07 1.69-3.06 1.77-3.11-.96-1.41-2.46-1.6-3-1.62-1.27-.13-2.49.75-3.14.75-.65 0-1.65-.73-2.71-.71-1.39.02-2.68.81-3.4 2.06-1.45 2.52-.37 6.25 1.04 8.29.69 1 1.51 2.12 2.58 2.08 1.04-.04 1.43-.67 2.69-.67 1.25 0 1.61.67 2.71.65 1.12-.02 1.83-1.02 2.51-2.02.79-1.16 1.12-2.28 1.13-2.34-.02-.01-2.17-.83-2.19-3.29zM14.3 5.81c.57-.7.96-1.66.85-2.62-.83.03-1.83.55-2.42 1.24-.53.61-.99 1.6-.87 2.54.93.07 1.87-.47 2.44-1.16z"></path>
+            </svg>
+          </span>
+          <span class="store-text"><span class="small">Download on the</span><span class="big">App Store</span></span>
+          <span class="coming-badge">Coming soon</span>
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="brand">Zelos</div>
+    <div class="mono">© 2026 Zelos. Crafted with care.</div>
+  </footer>
+
+  <script>
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    /* ── Boot sequence ── */
+    var boot = document.getElementById('boot');
+    var numEl = document.getElementById('bootNum');
+    var barEl = document.getElementById('bootBar');
+    var entered = false;
+
+    var enterEls = Array.prototype.slice.call(document.querySelectorAll('.enter'));
+    if (!reduce) {
+      enterEls.forEach(function (el) { el.style.opacity = '0'; });
+    }
+
+    function revealHero() {
+      enterEls.forEach(function (el, i) {
+        var delay = 150 + i * 130, dur = 1000;
+        el.style.transform = 'none';
+        if (reduce || typeof el.animate !== 'function') {
+          el.style.opacity = '1';
+          return;
+        }
+        el.style.opacity = '0';
+        var anim = el.animate(
+          [
+            { opacity: 0, transform: 'translateY(26px)' },
+            { opacity: 1, transform: 'none' }
+          ],
+          { duration: dur, delay: delay, easing: 'cubic-bezier(.22,1,.36,1)', fill: 'forwards' }
+        );
+        // Failsafe: cancel WAA and force visible if frames aren't painting
+        setTimeout(function () {
+          try { anim.cancel(); } catch (e) {}
+          el.style.opacity = '1';
+          el.style.transform = 'none';
+        }, delay + dur + 250);
+      });
+    }
+
+    function enter() {
+      if (entered) return;
+      entered = true;
+      void boot.offsetHeight;
+      boot.classList.add('done');
+      document.body.classList.add('entered');
+      setTimeout(function () {
+        boot.style.display = 'none';
+        document.body.classList.remove('booting');
+        revealHero();
+      }, 640);
+    }
+
+    if (reduce) {
+      numEl.textContent = '100'; barEl.style.width = '100%';
+      setTimeout(enter, 200);
+    } else {
+      var start = null, dur = 2100;
+      function tick(t) {
+        if (start === null) start = t;
+        var p = Math.min(1, (t - start) / dur);
+        var e = 1 - Math.pow(1 - p, 2.2);
+        var v = Math.round(e * 100);
+        numEl.textContent = (v < 10 ? '0' : '') + v;
+        barEl.style.width = (e * 100) + '%';
+        if (p < 1) { requestAnimationFrame(tick); }
+        else { setTimeout(enter, 360); }
+      }
+      requestAnimationFrame(tick);
+    }
+    boot.addEventListener('click', function () {
+      enter();
+      boot.classList.add('done');
+      boot.style.display = 'none';
+    });
+
+    /* ── Scroll cue — hide once user scrolls past the hero ── */
+    var scrollCue = document.getElementById('scrollCue');
+    var heroEl = document.querySelector('.hero');
+    function updateScrollCue() {
+      if (!heroEl || !scrollCue) return;
+      var heroBottom = heroEl.getBoundingClientRect().bottom;
+      if (heroBottom < window.innerHeight * 0.5) {
+        scrollCue.classList.add('hidden');
+      } else {
+        scrollCue.classList.remove('hidden');
+      }
+    }
+    window.addEventListener('scroll', updateScrollCue, { passive: true });
+    updateScrollCue();
+
+    /* ── Live clock in mock ── */
+    var phTime = document.getElementById('phTime');
+    function clock() {
+      var d = new Date();
+      var h = d.getHours(), m = d.getMinutes();
+      phTime.textContent = h + ':' + (m < 10 ? '0' : '') + m;
+    }
+    clock(); setInterval(clock, 15000);
+
+    /* ── Feature explorer data ── */
+    var DATA = [
+      {
+        eyebrow: 'Nutrition · insight',
+        bubble: "Your 3 PM energy dips line up with lunches under 20g of protein. Want a few swaps that keep you steady?",
+        mlabel: 'Afternoon energy', mval: '+18%',
+        spark: [22,20,24,18,30,16,34,22,40,28,42],
+        pill: 'Show me the swaps'
+      },
+      {
+        eyebrow: 'Fitness · adapt',
+        bubble: "Last night ran short on sleep, so I've eased tomorrow's strength session by two sets. We'll push again Thursday.",
+        mlabel: 'Recovery score', mval: '64%',
+        spark: [30,34,28,38,32,40,26,30,24,28,22],
+        pill: "View tomorrow's plan"
+      },
+      {
+        eyebrow: 'Mind · wellbeing',
+        bubble: "Your calmest days this week all began with a morning walk. Want me to protect that window tomorrow?",
+        mlabel: 'Mood, 7-day', mval: 'Lifting',
+        spark: [16,18,22,20,26,24,30,28,34,33,38],
+        pill: 'Protect my morning'
+      },
+      {
+        eyebrow: 'Patterns · discovery',
+        bubble: "Caffeine after 4 PM → restless sleep → lower mood the next day. I've now seen this 4 times this month.",
+        mlabel: 'Pattern confidence', mval: 'High',
+        spark: [20,38,18,40,16,42,14,44,12,40,18],
+        pill: 'See the full chain'
+      }
+    ];
+
+    var items = Array.prototype.slice.call(document.querySelectorAll('.exp-item'));
+    var steps = Array.prototype.slice.call(document.querySelectorAll('.exp-step'));
+    var prog = Array.prototype.slice.call(document.querySelectorAll('.exp-progress i'));
+    var phBody = document.getElementById('phBody');
+    var poly = document.getElementById('phPoly');
+    var current = -1;
+
+    function sparkCoords(arr) {
+      var w = 240, h = 46, pad = 3;
+      var max = Math.max.apply(null, arr), min = Math.min.apply(null, arr);
+      var span = (max - min) || 1;
+      return arr.map(function (v, i) {
+        var x = (i / (arr.length - 1)) * w;
+        var y = pad + (1 - (v - min) / span) * (h - pad * 2);
+        return [x, y];
+      });
+    }
+
+    function drawSpark(arr) {
+      var coords = sparkCoords(arr);
+      var ptStr = coords.map(function (c) { return c[0].toFixed(1) + ',' + c[1].toFixed(1); }).join(' ');
+      poly.setAttribute('points', ptStr);
+      var area = document.getElementById('phArea');
+      if (area) area.setAttribute('points', ptStr + ' 240,46 0,46');
+      var L = 0;
+      for (var i = 1; i < coords.length; i++) {
+        var dx = coords[i][0] - coords[i - 1][0], dy = coords[i][1] - coords[i - 1][1];
+        L += Math.sqrt(dx * dx + dy * dy);
+      }
+      if (reduce) { poly.style.strokeDasharray = 'none'; poly.style.strokeDashoffset = '0'; if (area) area.style.opacity = '1'; return; }
+      poly.style.transition = 'none';
+      poly.style.strokeDasharray = L;
+      poly.style.strokeDashoffset = L;
+      void poly.getBoundingClientRect();
+      poly.style.transition = 'stroke-dashoffset .9s cubic-bezier(.22,1,.36,1)';
+      poly.style.strokeDashoffset = '0';
+      if (area) {
+        area.style.transition = 'none'; area.style.opacity = '0';
+        void area.getBoundingClientRect();
+        area.style.transition = 'opacity .9s ease .25s'; area.style.opacity = '1';
+      }
+    }
+
+    var phTyping = document.getElementById('phTyping');
+    var phBubble = document.getElementById('phBubble');
+    var phMval = document.getElementById('phMval');
+
+    function setMetric(str) {
+      var m = String(str).match(/^([+\-]?)(\d+)(.*)$/);
+      if (reduce || !m) { phMval.textContent = str; return; }
+      var sign = m[1], target = parseInt(m[2], 10), suffix = m[3], dur = 900, st = null;
+      function step(t) {
+        if (st === null) st = t;
+        var p = Math.min(1, (t - st) / dur);
+        var e = 1 - Math.pow(1 - p, 2.4);
+        phMval.textContent = sign + Math.round(e * target) + suffix;
+        if (p < 1) requestAnimationFrame(step); else phMval.textContent = str;
+      }
+      requestAnimationFrame(step);
+    }
+
+    function render(i) {
+      var d = DATA[i];
+      document.getElementById('phEyebrow').textContent = d.eyebrow;
+      document.getElementById('phMlabel').textContent = d.mlabel;
+      document.getElementById('phPill').textContent = d.pill;
+      drawSpark(d.spark);
+      if (reduce) { phBubble.textContent = d.bubble; phMval.textContent = d.mval; return; }
+      phBubble.style.transition = 'none'; phBubble.style.opacity = '0'; phBubble.textContent = '';
+      phMval.textContent = '';
+      phTyping.classList.add('show');
+      clearTimeout(render._t);
+      render._t = setTimeout(function () {
+        phTyping.classList.remove('show');
+        phBubble.textContent = d.bubble;
+        void phBubble.getBoundingClientRect();
+        phBubble.style.transition = 'opacity .45s ease'; phBubble.style.opacity = '1';
+        setMetric(d.mval);
+      }, 720);
+    }
+
+    function setActive(i) {
+      if (i === current) return;
+      current = i;
+      items.forEach(function (it, idx) { it.classList.toggle('active', idx === i); });
+      prog.forEach(function (p, idx) { p.classList.toggle('on', idx === i); });
+      if (reduce) { render(i); return; }
+      phBody.classList.add('swap');
+      setTimeout(function () { render(i); phBody.classList.remove('swap'); }, 260);
+    }
+
+    render(0); current = 0;
+
+    // Scroll-driven step index mapped across the explorer's pinned range.
+    var explorer = document.querySelector('.explorer');
+    var nSteps = steps.length;
+    function onExpScroll() {
+      var scrollable = explorer.offsetHeight - window.innerHeight;
+      if (scrollable <= 0) { setActive(0); return; }
+      var progressed = Math.min(1, Math.max(0, -explorer.getBoundingClientRect().top / scrollable));
+      var idx = Math.min(nSteps - 1, Math.floor(progressed * nSteps));
+      setActive(idx);
+    }
+    window.addEventListener('scroll', onExpScroll, { passive: true });
+    window.addEventListener('resize', onExpScroll);
+    onExpScroll();
+
+    items.forEach(function (it) {
+      it.addEventListener('click', function () {
+        var i = parseInt(it.dataset.i, 10);
+        var scrollable = explorer.offsetHeight - window.innerHeight;
+        var top = explorer.getBoundingClientRect().top + window.pageYOffset + ((i + 0.5) / nSteps) * scrollable;
+        window.scrollTo({ top: top, behavior: 'smooth' });
+        setActive(i);
+      });
+    });
+
+    /* ── Scroll reveal ── */
+    var srs = Array.prototype.slice.call(document.querySelectorAll('.sr'));
+    if (reduce || !('IntersectionObserver' in window)) {
+      srs.forEach(function (el) { el.classList.add('in'); });
+    } else {
+      var io2 = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) { e.target.classList.add('in'); io2.unobserve(e.target); }
+        });
+      }, { threshold: 0.15, rootMargin: '0px 0px -8% 0px' });
+      srs.forEach(function (el) { io2.observe(el); });
+    }
+
+    /* ── Count-up stats ── */
+    var counted = false;
+    function runCount() {
+      if (counted) return; counted = true;
+      Array.prototype.slice.call(document.querySelectorAll('.cup')).forEach(function (el) {
+        var to = parseFloat(el.dataset.to);
+        if (reduce) { el.textContent = to; return; }
+        var dur = 1100, st = null;
+        function step(t) {
+          if (st === null) st = t;
+          var p = Math.min(1, (t - st) / dur);
+          var e = 1 - Math.pow(1 - p, 2.4);
+          el.textContent = Math.round(e * to);
+          if (p < 1) requestAnimationFrame(step);
+          else el.textContent = to;
+        }
+        requestAnimationFrame(step);
+      });
+    }
+    var statsEl = document.querySelector('.stats');
+    if (statsEl) {
+      if (reduce || !('IntersectionObserver' in window)) { runCount(); }
+      else {
+        var io3 = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) { if (e.isIntersecting) { runCount(); io3.disconnect(); } });
+        }, { threshold: 0.35 });
+        io3.observe(statsEl);
+      }
+    }
+
+    /* ── Scroll-progress hairline ── */
+    var sprog = document.getElementById('scrollProg');
+    function onScroll() {
+      var st = window.pageYOffset || document.documentElement.scrollTop;
+      var max = (document.documentElement.scrollHeight - window.innerHeight) || 1;
+      sprog.style.width = Math.max(0, Math.min(1, st / max)) * 100 + '%';
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll); onScroll();
+
+    /* ── Pointer parallax (aurora + grid) ── */
+    if (!reduce && window.matchMedia('(pointer: fine)').matches) {
+      var field = document.querySelector('.field');
+      var gridL = document.querySelector('.grid-lines');
+      var tx = 0, ty = 0, cx = 0, cy = 0;
+      window.addEventListener('pointermove', function (e) {
+        tx = (e.clientX / window.innerWidth - 0.5) * 2;
+        ty = (e.clientY / window.innerHeight - 0.5) * 2;
+      }, { passive: true });
+      (function loop() {
+        cx += (tx - cx) * 0.06; cy += (ty - cy) * 0.06;
+        if (field) field.style.transform = 'translate(' + (cx * 20) + 'px,' + (cy * 20) + 'px)';
+        if (gridL) gridL.style.transform = 'translate(' + (cx * -12) + 'px,' + (cy * -12) + 'px)';
+        requestAnimationFrame(loop);
+      })();
+    }
+
+    /* ── Store-button cursor spotlight ── */
+    Array.prototype.slice.call(document.querySelectorAll('.store-btn')).forEach(function (b) {
+      b.addEventListener('pointermove', function (e) {
+        var r = b.getBoundingClientRect();
+        b.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+        b.style.setProperty('--my', (e.clientY - r.top) + 'px');
+      }, { passive: true });
+    });
+  })();
+  </script>
+
+  <script>
+  /* ── Pattern Discovery + Day-in-balance ─────────────────── */
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var NS = 'http://www.w3.org/2000/svg';
+
+    /* ---- Constellation ---- */
+    (function () {
+      var host = document.getElementById('constellation');
+      var noteHost = document.getElementById('cnNotes');
+      if (!host) return;
+      var W = 1000, H = 540;
+      var nodes = [
+        { x: 175, y: 380, l: 'Caffeine 4PM',  ly: 32  },
+        { x: 385, y: 150, l: 'Restless sleep', ly: -28 },
+        { x: 835, y: 360, l: 'Lower mood',     ly: 34  },
+        { x: 560, y: 295, l: 'HRV',            ly: -26 },
+        { x: 305, y: 470, l: 'Protein',         ly: 34  },
+        { x: 625, y: 120, l: 'Steps',           ly: -26 },
+        { x: 705, y: 470, l: 'Energy',          ly: 34  }
+      ];
+      var edges = [[1, 3], [3, 6], [4, 6], [5, 3], [4, 0], [5, 2], [1, 5], [3, 2]];
+
+      var EVID = [
+        { rows: ['2.1 cups avg after 4 PM', '184 mg late-day caffeine', 'Logged 4 of the last 7 days'], src: 'Source: Nutrition log' },
+        { rows: ['5h 51m avg on these nights', '3.2 awakenings per night', '76% sleep efficiency'], src: 'Source: Sleep tracking' },
+        { rows: ['3.1 / 5 next-day mood', '22% below your baseline', 'Reported 4 of 7 mornings'], src: 'Source: Daily check-in' },
+        { rows: ['48 ms overnight HRV avg', '+14% on movement days', 'Trending up 6 days'], src: 'Source: Recovery signals' },
+        { rows: ['18 g protein avg at lunch', 'Below 20 g on dip days', 'Across 31 tracked meals'], src: 'Source: Nutrition log' },
+        { rows: ['7,420 steps daily avg', '9,260 on active mornings', 'Peak window 7–9 AM'], src: 'Source: Activity tracking' },
+        { rows: ['4.2 / 5 self-rated energy', '+0.8 on movement days', 'Steadiest through midday'], src: 'Source: Daily check-in' }
+      ];
+
+      var PATTERNS = [
+        { chain: [0, 1, 2], hot: [0, 1, 2],
+          found: 'Pattern found: <span class="hl">caffeine after 4 PM → restless sleep → lower mood the next day.</span>' },
+        { chain: [5, 3, 6], hot: [5, 3, 6],
+          found: 'Pattern found: <span class="hl">morning movement → higher HRV → steadier energy all day.</span>' }
+      ];
+      var SCAN = 'Scanning your signals…';
+
+      var svg = document.createElementNS(NS, 'svg');
+      svg.setAttribute('viewBox', '0 82 1000 440');
+      svg.innerHTML = '<defs><linearGradient id="cnGrad" x1="0" y1="0" x2="1000" y2="0" gradientUnits="userSpaceOnUse"><stop stop-color="#7E8DEB"/><stop offset="1" stop-color="#78E0BA"/></linearGradient></defs>';
+
+      var edgeEls = edges.map(function (e) {
+        var a = nodes[e[0]], b = nodes[e[1]];
+        var p = document.createElementNS(NS, 'path');
+        p.setAttribute('d', 'M' + a.x + ' ' + a.y + ' L' + b.x + ' ' + b.y);
+        p.setAttribute('class', 'cn-edge');
+        var len = Math.hypot(b.x - a.x, b.y - a.y);
+        p.style.strokeDasharray = len; p.style.strokeDashoffset = len;
+        svg.appendChild(p); return p;
+      });
+
+      var chainEl = document.createElementNS(NS, 'path');
+      chainEl.setAttribute('class', 'cn-chain');
+      svg.appendChild(chainEl);
+
+      var nodeEls = nodes.map(function (n) {
+        var outer = document.createElementNS(NS, 'g');
+        outer.setAttribute('transform', 'translate(' + n.x + ' ' + n.y + ')');
+        var g = document.createElementNS(NS, 'g');
+        g.setAttribute('class', 'cn-node');
+        g.innerHTML =
+          '<circle class="halo" r="17"></circle>' +
+          '<circle class="dot" r="6"></circle>' +
+          '<text class="cn-label" text-anchor="middle" y="' + n.ly + '">' + n.l + '</text>' +
+          '<circle class="cn-hit" r="42"></circle>';
+        outer.appendChild(g);
+        svg.appendChild(outer); return g;
+      });
+
+      var pulse = document.createElementNS(NS, 'circle');
+      pulse.setAttribute('class', 'cn-pulse'); pulse.setAttribute('r', '5');
+      svg.appendChild(pulse);
+      host.appendChild(svg);
+
+      /* Evidence note panel (HTML overlay) */
+      var note = document.createElement('div'); note.className = 'cn-note';
+      if (noteHost) noteHost.appendChild(note);
+
+      function showNote(i) {
+        var ev = EVID[i];
+        note.innerHTML = '<div class="nh">' + nodes[i].l + '</div><ul>' +
+          ev.rows.map(function (r) { return '<li>' + r + '</li>'; }).join('') +
+          '<li><span class="src">' + ev.src + '</span></li></ul>';
+        var nr = nodeEls[i].getBoundingClientRect();
+        var hr = host.getBoundingClientRect();
+        var cx = nr.left + nr.width / 2 - hr.left;
+        var cy = nr.top + nr.height / 2 - hr.top;
+        note.classList.remove('above', 'below');
+        note.classList.add(nodes[i].ly < 0 ? 'below' : 'above');
+        note.style.top = cy + 'px';
+        note.classList.add('show');
+        var half = note.offsetWidth / 2;
+        var clx = Math.max(half + 4, Math.min(hr.width - half - 4, cx));
+        note.style.left = clx + 'px';
+      }
+      function hideNote() { note.classList.remove('show'); }
+
+      nodeEls.forEach(function (g, i) {
+        g.addEventListener('mouseenter', function () { showNote(i); });
+        g.addEventListener('mouseleave', hideNote);
+      });
+
+      var caption = document.getElementById('cnCaption');
+      var chainLen = 0;
+
+      function buildChainPath(chain) {
+        var d = 'M' + nodes[chain[0]].x + ' ' + nodes[chain[0]].y;
+        for (var i = 1; i < chain.length; i++) { d += ' L' + nodes[chain[i]].x + ' ' + nodes[chain[i]].y; }
+        return d;
+      }
+      function setHot(indices) {
+        nodeEls.forEach(function (g, i) { g.classList.toggle('hot', indices.indexOf(i) >= 0); });
+      }
+
+      function pulseRun(times) {
+        if (reduce) return;
+        var t0 = null, pass = 0, dur = 1300;
+        function step(t) {
+          if (t0 === null) t0 = t;
+          var p = (t - t0) / dur;
+          if (p >= 1) { pass++; if (pass >= times) { pulse.style.opacity = 0; return; } t0 = t; p = 0; }
+          var pt = chainEl.getPointAtLength(p * chainLen);
+          pulse.setAttribute('cx', pt.x); pulse.setAttribute('cy', pt.y);
+          pulse.style.opacity = Math.sin(p * Math.PI) * 0.95;
+          requestAnimationFrame(step);
+        }
+        requestAnimationFrame(step);
+      }
+
+      var started = false;
+      function runPattern(idx) {
+        var pat = PATTERNS[idx];
+        caption.style.transition = 'opacity .4s ease';
+        chainEl.classList.remove('draw');
+        chainEl.setAttribute('d', buildChainPath(pat.chain));
+        chainLen = chainEl.getTotalLength();
+        chainEl.style.transition = 'none';
+        chainEl.style.strokeDasharray = chainLen;
+        chainEl.style.strokeDashoffset = chainLen;
+        chainEl.style.opacity = '1';
+        void chainEl.getBoundingClientRect();
+        setHot(pat.hot);
+        caption.innerHTML = SCAN;
+        setTimeout(function () {
+          chainEl.style.transition = '';
+          chainEl.classList.add('draw');
+          caption.innerHTML = pat.found;
+          setTimeout(function () { pulseRun(2); }, 760);
+        }, 640);
+        setTimeout(function () {
+          chainEl.style.transition = 'opacity .55s ease';
+          chainEl.style.opacity = '0';
+          setTimeout(function () { runPattern((idx + 1) % PATTERNS.length); }, 560);
+        }, 5600);
+      }
+
+      function play() {
+        if (started) return; started = true;
+        if (reduce) {
+          nodeEls.forEach(function (g) { g.classList.add('in'); });
+          edgeEls.forEach(function (e) { e.classList.add('draw'); });
+          setHot(PATTERNS[0].hot);
+          chainEl.setAttribute('d', buildChainPath(PATTERNS[0].chain));
+          chainEl.classList.add('draw');
+          caption.innerHTML = PATTERNS[0].found;
+          return;
+        }
+        nodeEls.forEach(function (g, i) { setTimeout(function () { g.classList.add('in'); }, i * 95); });
+        var afterNodes = nodes.length * 95 + 250;
+        edgeEls.forEach(function (e, i) { setTimeout(function () { e.classList.add('draw'); }, afterNodes + i * 70); });
+        var afterEdges = afterNodes + edges.length * 70 + 550;
+        setTimeout(function () { runPattern(0); }, afterEdges);
+      }
+
+      if (reduce) { play(); return; }
+      if ('IntersectionObserver' in window) {
+        var io = new IntersectionObserver(function (es) {
+          es.forEach(function (e) { if (e.isIntersecting) { play(); io.disconnect(); } });
+        }, { threshold: 0.3 });
+        io.observe(host);
+      } else { play(); }
+    })();
+
+    /* ---- Day-in-balance ring ---- */
+    (function () {
+      var ring = document.querySelector('.balance-ring');
+      if (!ring) return;
+      var fills = Array.prototype.slice.call(ring.querySelectorAll('.ring-fill'));
+      fills.forEach(function (c) {
+        var r = parseFloat(c.getAttribute('r')), C = 2 * Math.PI * r;
+        c.style.strokeDasharray = C; c.style.strokeDashoffset = C; c.dataset.c = C;
+      });
+      var numEl = document.getElementById('readyNum'), target = 92;
+      function play() {
+        fills.forEach(function (c) {
+          var C = parseFloat(c.dataset.c), frac = parseFloat(c.dataset.frac);
+          c.classList.add('go');
+          requestAnimationFrame(function () { c.style.strokeDashoffset = C * (1 - frac); });
+        });
+        if (reduce) { numEl.textContent = target; return; }
+        var t0 = null, dur = 1500;
+        function step(t) {
+          if (t0 === null) t0 = t;
+          var p = Math.min(1, (t - t0) / dur);
+          var e = 1 - Math.pow(1 - p, 2.4);
+          numEl.textContent = Math.round(e * target);
+          if (p < 1) requestAnimationFrame(step); else numEl.textContent = target;
+        }
+        requestAnimationFrame(step);
+      }
+      if (reduce) { play(); return; }
+      var done = false;
+      if ('IntersectionObserver' in window) {
+        var io = new IntersectionObserver(function (es) {
+          es.forEach(function (e) { if (e.isIntersecting && !done) { done = true; play(); io.disconnect(); } });
+        }, { threshold: 0.4 });
+        io.observe(document.querySelector('.balance'));
+      } else { play(); }
+
+      /* Readiness tooltip */
+      var rcInfo = document.getElementById('rcInfo'), rcTip = document.getElementById('rcTip');
+      if (rcInfo && rcTip) {
+        var show = function () { rcTip.classList.add('show'); };
+        var hide = function () { rcTip.classList.remove('show'); };
+        rcInfo.addEventListener('mouseenter', show);
+        rcInfo.addEventListener('mouseleave', hide);
+        rcInfo.addEventListener('focus', show);
+        rcInfo.addEventListener('blur', hide);
+        rcInfo.addEventListener('click', function () { rcTip.classList.toggle('show'); });
+      }
+    })();
+  })();
+  </script>
+
+  <!-- FAQPage structured data for SEO -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "When is Zelos launching?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Zelos is launching soon on Android and iOS. Check back to be among the first to meet your coach." }
+      },
+      {
+        "@type": "Question",
+        "name": "What data does Zelos use?",
+        "acceptedAnswer": { "@type": "Answer", "text": "With your permission, Zelos learns from your nutrition, workouts, sleep, activity, and mood. You decide what to share." }
+      },
+      {
+        "@type": "Question",
+        "name": "Is my health data private?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes. Your data is private, encrypted, and never sold. Zelos works for you and only you." }
+      },
+      {
+        "@type": "Question",
+        "name": "How is Zelos different from other health apps?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Most apps track a single metric. Zelos connects everything into one picture — and personalizes guidance for both your physical health and your mental wellbeing." }
+      },
+      {
+        "@type": "Question",
+        "name": "Can Zelos help with mental wellbeing?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Zelos reveals how your physical habits affect your mood and offers personalized, supportive tips — as a caring companion, not a replacement for professional care." }
+      },
+      {
+        "@type": "Question",
+        "name": "Will Zelos be free?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Zelos will offer a generous free experience, with optional premium features for deeper, more personalized coaching." }
+      }
+    ]
+  }
+  </script>
+</body>
+</html>
