@@ -909,7 +909,7 @@ const styles = StyleSheet.create({
   voiceSendTxt: { fontSize: 14, color: t.auraBg },
 
   // History modal
-  historyModal: { flex: 1, backgroundColor: '#070A13' },
+  historyModal: { flex: 1, backgroundColor: t.auraBg },
   historyHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: t.line },
   historyTitle: { fontSize: 20, color: t.text },
   historyClose: { fontSize: 20, color: t.text2 },

@@ -12,7 +12,7 @@ export function initAnalytics() {
 }
 
 export function identifyUser(userId: string, traits?: Record<string, string | number | boolean>) {
-  client?.identify(userId, traits as any);
+  client?.identify(userId, traits);
 }
 
 export function resetUser() {
@@ -20,7 +20,7 @@ export function resetUser() {
 }
 
 export function trackEvent(event: string, properties?: Record<string, string | number | boolean>) {
-  client?.capture(event, properties as any);
+  client?.capture(event, properties);
 }
 
 export function trackScreen(screen: string) {

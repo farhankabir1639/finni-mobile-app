@@ -386,7 +386,7 @@ export default function OnboardingScreen() {
                 style={[s.ctaGradient, (!canNext || isSaving) && { opacity: 0.5 }]}
               >
                 <Text style={s.ctaGradientText}>
-                  {isSaving ? 'Saving...' : step === 2 ? 'Set goal & finish' : 'Continue'}
+                  {isSaving ? 'Saving...' : step === 2 ? (selectedGoal && goalName.trim() ? 'Set goal & finish' : 'Finish setup') : 'Continue'}
                 </Text>
                 {!isSaving && <Text style={{ fontSize: 18, color: '#0b0a1a' }}>→</Text>}
               </LinearGradient>

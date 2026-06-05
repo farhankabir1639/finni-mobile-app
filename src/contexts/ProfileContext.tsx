@@ -72,13 +72,14 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         .select('name, currency, onboarding_complete')
         .eq('id', user.id)
         .maybeSingle();
-      if (data) {
+      const row = data as { name?: string | null; currency?: string; onboarding_complete?: boolean } | null;
+      if (row) {
         setProfile({
-          name: (data as any).name ?? null,
-          currency: (data as any).currency ?? 'USD',
+          name: row.name ?? null,
+          currency: row.currency ?? 'USD',
           location: null,
           monthlyBudget: 0,
-          onboardingComplete: (data as any).onboarding_complete ?? true,
+          onboardingComplete: row.onboarding_complete ?? true,
         });
       } else {
         setProfile({ ...defaultProfile, onboardingComplete: false });

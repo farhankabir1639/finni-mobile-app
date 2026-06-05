@@ -32,7 +32,7 @@ export default function EditProfileModal({
   useEffect(() => {
     if (!userId) return;
     supabase.from('profiles').select('name').eq('id', userId).maybeSingle()
-      .then(({ data }) => { if (data) setName((data as any).name ?? ''); });
+      .then(({ data }) => { if (data) setName((data as { name?: string }).name ?? ''); });
   }, [userId]);
 
   const handleSave = async () => {

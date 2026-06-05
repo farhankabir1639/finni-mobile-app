@@ -75,7 +75,7 @@ export default function CategoryPickerSheet({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0F1E',
+    backgroundColor: t.auraBg,
   },
   handleWrap: {
     alignItems: 'center',
@@ -151,7 +151,7 @@ const styles = StyleSheet.create({
   },
   checkText: {
     fontSize: 11,
-    color: '#0a0f1e',
+    color: t.auraBg,
     fontWeight: '700',
   },
 });
