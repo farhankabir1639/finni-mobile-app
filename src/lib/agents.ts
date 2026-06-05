@@ -822,6 +822,7 @@ If the user mentions buying, investing in, or adding stocks, crypto, mutual fund
   INVESTMENT_DATA:{"name": "Asset Name", "ticker": "TICK", "asset_type": "stock", "quantity": 10, "buy_price": 450, "action": "buy"}
 If the user mentions selling an investment:
   INVESTMENT_DATA:{"name": "Asset Name", "ticker": "TICK", "asset_type": "stock", "quantity": 5, "buy_price": 280, "action": "sell"}
+Note: For sell actions, "buy_price" is the sell price per unit.
 Examples:
 - "bought 10 shares of Grameenphone at 450" → stock, qty 10, price 450, action buy
 - "added 0.5 BTC at 95000" → crypto, qty 0.5, price 95000, action buy
@@ -835,11 +836,16 @@ If the user asks about their portfolio, use the investment data above to answer 
 CRITICAL RULES — YOU MUST FOLLOW THESE EXACTLY:
 1. Every time you log a transaction, your response MUST end with TRANSACTION_DATA on its own line.
 2. Format: TRANSACTION_DATA:{"amount": number, "description": "string", "category_id": "CategoryName", "type": "expense"|"income"}
-3. Write the confirmation message first, then TRANSACTION_DATA last. Nothing after TRANSACTION_DATA.
-4. Example of a CORRECT response:
+3. Every time you log an investment, your response MUST end with INVESTMENT_DATA on its own line.
+4. Write the confirmation message first, then the data tag last. Nothing after the data tag.
+5. Example of a CORRECT transaction response:
    ✅ Logged $650 under Shopping.
    TRANSACTION_DATA:{"amount": 650, "description": "Daraz order", "category_id": "Shopping", "type": "expense"}
-5. NEVER respond with only the confirmation text and no TRANSACTION_DATA — the app cannot save without it.
+6. Example of a CORRECT investment response:
+   ✅ Added 10 shares of Grameenphone to your portfolio at ৳450/share.
+   INVESTMENT_DATA:{"name": "Grameenphone", "ticker": "GP", "asset_type": "stock", "quantity": 10, "buy_price": 450, "action": "buy"}
+7. NEVER respond with only the confirmation text and no data tag — the app cannot save without it.
+8. NEVER emit both TRANSACTION_DATA and INVESTMENT_DATA in the same response. Pick one based on what the user said.
 
 Current user message: ${userMessage}`;
 
@@ -866,8 +872,14 @@ Current user message: ${userMessage}`;
       };
     }
 
+    // If investment data is present, skip transaction processing entirely
+    // (prevents double-logging when Gemini emits both tags)
+    if (investmentData && investmentData.quantity > 0 && investmentData.buy_price > 0) {
+      txData = null;
+    }
+
     // Fallback: if Gemini dropped TRANSACTION_DATA but wrote "✅ Logged $X under Y.", parse it directly
-    if (!txData && !newCategory) {
+    if (!txData && !newCategory && !investmentData) {
       const loggedMatch = response.match(/✅\s+Logged\s+\$?([\d.]+)\s+under\s+([^.\n!]+)/i);
       if (loggedMatch) {
         const parsedAmount = parseFloat(loggedMatch[1]);
@@ -1140,6 +1152,27 @@ Current user message: ${userMessage}`;
       };
     }
 
+    // Handle GOAL_UPDATE standalone (when emitted without TRANSACTION_DATA)
+    if (goalUpdate && !txData) {
+      const { data: matchedGoals } = await supabase
+        .from('financial_goals')
+        .select('id, current_amount, target_amount, name')
+        .eq('user_id', userId)
+        .ilike('name', goalUpdate.goal_name);
+      const goal = matchedGoals?.[0] as { id: string; current_amount: number; target_amount: number; name: string } | undefined;
+      if (goal) {
+        const newAmount = Math.min(
+          Number(goal.target_amount ?? Infinity),
+          Number(goal.current_amount ?? 0) + goalUpdate.amount
+        );
+        await supabase.from('financial_goals')
+          .update({ current_amount: newAmount })
+          .eq('id', goal.id)
+          .eq('user_id', userId);
+        if (__DEV__) console.log(`[Agent1] Standalone goal update: "${goal.name}" → ${newAmount}`);
+      }
+    }
+
     // Fallback: only match past-tense confirmations, not proposals
     if (!goalCreate) {
       const isConfirmation = /(?:i(?:'ve| have) created|created a (?:new )?(?:savings |financial )?goal)/i.test(response);
@@ -1204,8 +1237,8 @@ Current user message: ${userMessage}`;
           .update({ budget: validatedBudget, type: 'monthly' })
           .eq('id', cat.id)
           .eq('user_id', userId);
-        if (cbError) console.error('[Agent1] Category budget update error:', cbError);
-        else console.log(`[Agent1] Category "${cat.name}" budget set to ${categoryBudgetUpdate.budget}`);
+        if (cbError) { if (__DEV__) console.error('[Agent1] Category budget update error:', cbError); }
+        else if (__DEV__) console.log(`[Agent1] Category "${cat.name}" budget set to ${categoryBudgetUpdate.budget}`);
       } else {
         if (__DEV__) console.warn('[Agent1] CATEGORY_BUDGET: no matching category for:', categoryBudgetUpdate.category_name);
       }
