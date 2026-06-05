@@ -15,11 +15,11 @@ interface BlobConfig {
 }
 
 const BLOBS: BlobConfig[] = [
-  { color: t.auraViolet, size: 320, topPct: -0.06, leftPct: -0.12, driftX: 30,  driftY: -18, duration: 18000, opacity: 0.45 },
-  { color: t.auraIndigo, size: 360, topPct:  0.20, leftPct:  0.52, driftX: -28, driftY:  24, duration: 22000, opacity: 0.42 },
-  { color: t.auraAqua,   size: 260, topPct:  0.54, leftPct: -0.10, driftX:  20, driftY: -14, duration: 26000, opacity: 0.28 },
-  { color: t.auraRose,   size: 230, topPct:  0.66, leftPct:  0.58, driftX: -16, driftY:  18, duration: 24000, opacity: 0.22 },
-  { color: t.auraBlue,   size: 220, topPct:  0.38, leftPct:  0.22, driftX:  22, driftY: -10, duration: 20000, opacity: 0.24 },
+  { color: t.auraViolet, size: 320, topPct: -0.06, leftPct: -0.12, driftX: 30,  driftY: -18, duration: 18000, opacity: 0.16 },
+  { color: t.auraIndigo, size: 360, topPct:  0.20, leftPct:  0.52, driftX: -28, driftY:  24, duration: 22000, opacity: 0.14 },
+  { color: t.auraAqua,   size: 260, topPct:  0.54, leftPct: -0.10, driftX:  20, driftY: -14, duration: 26000, opacity: 0.09 },
+  { color: t.auraRose,   size: 230, topPct:  0.66, leftPct:  0.58, driftX: -16, driftY:  18, duration: 24000, opacity: 0.07 },
+  { color: t.auraBlue,   size: 220, topPct:  0.38, leftPct:  0.22, driftX:  22, driftY: -10, duration: 20000, opacity: 0.08 },
 ];
 
 function AuroraBlob({ blob, screenWidth, screenHeight }: {

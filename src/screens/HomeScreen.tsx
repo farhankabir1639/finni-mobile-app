@@ -9,7 +9,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import Svg, { Path, Circle as SvgCircle } from 'react-native-svg';
 import { useAuth } from '../contexts/AuthContext';
@@ -141,9 +141,13 @@ const aiStyles = StyleSheet.create({
 });
 
 // ── Main Screen ───────────────────────────────────────────────────────────────
+// GlassDock content height: paddingVertical(10*2) + tabPadding(4*2) + icon(22) + gap(4) + label(12) ≈ 70px
+const DOCK_CONTENT_H = 70;
+
 export default function HomeScreen() {
   const navigation = useNavigation();
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { currencySymbol } = useProfile();
 
@@ -155,6 +159,8 @@ export default function HomeScreen() {
   const [typingDots, setTypingDots]       = useState('.');
   const [monthUsedPct, setMonthUsedPct]   = useState(0);
   const [budgetLeft, setBudgetLeft]       = useState(0);
+  const [monthlyBudget, setMonthlyBudget] = useState(0);
+  const [monthSpent, setMonthSpent]       = useState(0);
   const [chatContext, setChatContext]     = useState<{
     profile?: { name?: string; currency?: string } | null;
     categories?: { id: string; name: string; emoji?: string; budget?: number; spent?: number }[] | null;
@@ -275,6 +281,8 @@ export default function HomeScreen() {
       }, 0);
       setMonthUsedPct(monthlyIncome > 0 ? Math.min(100, Math.round((monthTotal / monthlyIncome) * 100)) : 0);
       setBudgetLeft(Math.max(0, monthlyIncome - monthTotal));
+      setMonthlyBudget(monthlyIncome);
+      setMonthSpent(monthTotal);
     } catch (e) { captureError(e, { context: 'fetchStats' }); }
   }, [user?.id]);
 
@@ -528,7 +536,7 @@ export default function HomeScreen() {
               <ArcMeter size={200} pct={monthUsedPct} markerPct={monthElapsedPct}>
                 <Orb size={84} rings talking={isTyping} />
                 <Text style={[styles.arcPct, { fontFamily: fonts.extraBold }]}>{monthUsedPct}%</Text>
-                <Text style={[styles.arcSub, { fontFamily: fonts.medium }]}>of budget</Text>
+                <Text style={[styles.arcSub, { fontFamily: fonts.medium }]}>budget used</Text>
               </ArcMeter>
 
               {/* Pace pill */}
@@ -539,10 +547,16 @@ export default function HomeScreen() {
                 </Text>
               </View>
 
-              {/* Budget left */}
-              <Text style={[styles.budgetLeft, { fontFamily: fonts.medium }]}>
-                {currencySymbol}{budgetLeft.toFixed(0)} left this month
-              </Text>
+              {/* Spending context */}
+              {monthlyBudget > 0 ? (
+                <Text style={[styles.budgetLeft, { fontFamily: fonts.medium }]}>
+                  {currencySymbol}{monthSpent.toFixed(0)} spent · {currencySymbol}{budgetLeft.toFixed(0)} left
+                </Text>
+              ) : (
+                <Text style={[styles.budgetLeft, { fontFamily: fonts.medium }]}>
+                  Add income in Settings to track budget
+                </Text>
+              )}
             </View>
 
             {/* Finni noticed card */}
@@ -651,7 +665,7 @@ export default function HomeScreen() {
 
           {/* ── COMPOSER ── */}
           {isRecording ? (
-            <View style={[styles.composerAndroid, styles.voiceBar]}>
+            <View style={[styles.composerAndroid, styles.voiceBar, { paddingBottom: Math.max(insets.bottom, 8) + DOCK_CONTENT_H }]}>
               <TouchableOpacity style={styles.voiceCancelBtn} onPress={stopRecording} hitSlop={12}>
                 <Text style={[styles.voiceCancelTxt, { fontFamily: fonts.semiBold }]}>✕</Text>
               </TouchableOpacity>
@@ -666,11 +680,11 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
           ) : Platform.OS === 'ios' ? (
-            <BlurView intensity={22} tint="dark" style={styles.composerBlur}>
+            <BlurView intensity={22} tint="dark" style={[styles.composerBlur, { paddingBottom: Math.max(insets.bottom, 8) + DOCK_CONTENT_H }]}>
               {composerInner}
             </BlurView>
           ) : (
-            <View style={styles.composerAndroid}>
+            <View style={[styles.composerAndroid, { paddingBottom: Math.max(insets.bottom, 8) + DOCK_CONTENT_H }]}>
               {composerInner}
             </View>
           )}
