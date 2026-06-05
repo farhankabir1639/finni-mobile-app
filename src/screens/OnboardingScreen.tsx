@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
+  Dimensions,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -11,20 +12,25 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfile, CURRENCIES } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
-import { t } from '../theme/tokens';
+import { t, fonts } from '../theme/tokens';
 import { seedDefaultCategories } from '../lib/seedCategories';
+import Aurora from '../components/Aurora';
+import Orb from '../components/Orb';
+import GlassCard from '../components/GlassCard';
 
+const { width: SW, height: SH } = Dimensions.get('window');
 
 const GOAL_CARDS = [
-  { type: 'saving', label: 'Save money', emoji: '💰' },
-  { type: 'home', label: 'Buy a home', emoji: '🏠' },
-  { type: 'education', label: 'Education', emoji: '📚' },
-  { type: 'travel', label: 'Travel', emoji: '🌍' },
-  { type: 'debt_payment', label: 'Pay off debt', emoji: '💳' },
-  { type: 'custom', label: 'Custom', emoji: '🎯' },
+  { type: 'saving', label: 'Save money', emoji: '💰', color: t.auraAqua },
+  { type: 'home', label: 'Buy a home', emoji: '🏠', color: t.auraViolet },
+  { type: 'education', label: 'Education', emoji: '📚', color: t.auraBlue },
+  { type: 'travel', label: 'Travel', emoji: '🌍', color: t.auraAqua },
+  { type: 'debt_payment', label: 'Pay off debt', emoji: '💳', color: t.auraRose },
+  { type: 'custom', label: 'Custom', emoji: '🎯', color: t.amber },
 ] as const;
 
 type GoalCard = typeof GOAL_CARDS[number];
@@ -42,10 +48,24 @@ function suggestCurrency(location: string): string {
 }
 
 const STEP_MESSAGES = [
-  "Hey! 👋 I'm Finni, your personal finance coach.\nLet's personalize your experience.",
-  "Let's set up your finances so I can give\nyou personalized advice 💰",
-  "Finally, set a goal to work towards.\nI'll help you get there! 🎯",
+  "I'm Finni, your AI finance coach. Let's shape your space — start with the basics.",
+  "Now your income, so I can tailor budgets and advice to your real numbers 💰",
+  "Finally, pick a goal to work toward. I'll track it and help you get there! 🎯",
 ];
+
+// ── FinniSay speech bubble ──
+function FinniSay({ children }: { children: string }) {
+  return (
+    <View style={s.finniRow}>
+      <View style={{ marginTop: 2 }}>
+        <Orb size={40} talking />
+      </View>
+      <GlassCard style={s.finniMessageBubble} borderRadius={16} intensity={22}>
+        <Text style={s.finniMessageText}>{children}</Text>
+      </GlassCard>
+    </View>
+  );
+}
 
 export default function OnboardingScreen() {
   const { user } = useAuth();
@@ -76,25 +96,23 @@ export default function OnboardingScreen() {
   const [showFallback, setShowFallback] = useState(false);
 
   // Auto-suggest currency from location
-  useEffect(() => {
-    if (location.trim()) setCurrency(suggestCurrency(location));
-  }, [location]);
+  useEffect(() => { if (location.trim()) setCurrency(suggestCurrency(location)); }, [location]);
 
-  // Pre-fill budget as 70% of income (unless user manually changed it)
+  // Pre-fill budget as 70% of income
   useEffect(() => {
     if (budgetManuallySet.current) return;
     const amt = parseFloat(incomeAmount);
     if (!isNaN(amt) && amt > 0) setBudget(Math.round(amt * 0.7).toString());
   }, [incomeAmount]);
 
-  // Auto-fill goal name from card selection
+  // Auto-fill goal name
   useEffect(() => {
     if (!selectedGoal) return;
     if (selectedGoal.type !== 'custom') setGoalName(selectedGoal.label);
     else setGoalName('');
   }, [selectedGoal]);
 
-  // Show fallback "Get Started" button if auto-navigation hasn't fired after 3s
+  // Show fallback after 3s on completion
   useEffect(() => {
     if (step !== 3) return;
     const timer = setTimeout(() => setShowFallback(true), 3000);
@@ -105,83 +123,47 @@ export default function OnboardingScreen() {
 
   const animateIn = (direction: 'forward' | 'back') => {
     slideAnim.setValue(direction === 'forward' ? 350 : -350);
-    Animated.spring(slideAnim, {
-      toValue: 0,
-      useNativeDriver: true,
-      tension: 70,
-      friction: 12,
-    }).start();
+    Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 70, friction: 12 }).start();
   };
 
-  const advance = useCallback(() => {
-    animateIn('forward');
-    setStep((s) => s + 1);
-  }, []);
+  const advance = useCallback(() => { animateIn('forward'); setStep((s) => s + 1); }, []);
+  const retreat = useCallback(() => { animateIn('back'); setStep((s) => Math.max(0, s - 1)); }, []);
 
-  const retreat = useCallback(() => {
-    animateIn('back');
-    setStep((s) => Math.max(0, s - 1));
-  }, []);
-
+  // ── Save logic (unchanged) ──
   const saveStep1 = async () => {
     if (!user?.id) return;
     const now = new Date().toISOString();
-    const payload: Record<string, unknown> = {
-      id: user.id,
-      currency,
-      created_at: now,
-      updated_at: now,
-    };
+    const payload: Record<string, unknown> = { id: user.id, currency, created_at: now, updated_at: now };
     if (name.trim()) payload.name = name.trim();
     const { error } = await supabase.from('profiles').upsert(payload);
-    if (error) console.error('[Onboarding] saveStep1 error:', error);
+    if (error && __DEV__) console.error('[Onboarding] saveStep1 error:', error);
   };
 
   const saveStep2 = async () => {
     if (!user?.id) return;
     const incomeAmt = parseFloat(incomeAmount);
-    const profilePayload: Record<string, unknown> = { id: user.id };
-    if (Object.keys(profilePayload).length > 1) await supabase.from('profiles').upsert(profilePayload);
     if (!isNaN(incomeAmt) && incomeAmt > 0) {
       await supabase.from('income').insert({
-        user_id: user.id,
-        label: incomeLabel.trim() || 'Income',
-        amount: incomeAmt,
-        frequency: 'monthly',
+        user_id: user.id, label: incomeLabel.trim() || 'Income', amount: incomeAmt, frequency: 'monthly',
       });
     }
   };
 
-  // Map onboarding card types to the valid DB enum values used in financial_goals
   const GOAL_TYPE_MAP: Record<string, string> = {
-    saving: 'saving',
-    home: 'saving',
-    education: 'saving',
-    travel: 'saving',
-    debt_payment: 'debt_payment',
-    custom: 'saving',
+    saving: 'saving', home: 'saving', education: 'saving', travel: 'saving', debt_payment: 'debt_payment', custom: 'saving',
   };
 
   const saveStep3 = async () => {
     if (!user?.id || !selectedGoal || !goalName.trim()) return;
     const targetAmt = parseFloat(targetAmount);
-    const targetDate =
-      deadline.trim() && /^\d{4}-\d{2}-\d{2}$/.test(deadline)
-        ? new Date(`${deadline.trim()}T12:00:00`).toISOString()
-        : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+    const targetDate = deadline.trim() && /^\d{4}-\d{2}-\d{2}$/.test(deadline)
+      ? new Date(`${deadline.trim()}T12:00:00`).toISOString()
+      : new Date(Date.now() + 365 * 86400000).toISOString();
     const { error } = await supabase.from('financial_goals').insert({
-      user_id: user.id,
-      name: goalName.trim(),
-      target_amount: isNaN(targetAmt) ? 1000 : targetAmt,
-      current_amount: 0,
-      target_date: targetDate,
-      goal_type: GOAL_TYPE_MAP[selectedGoal.type] ?? 'saving',
-      status: 'in_progress',
+      user_id: user.id, name: goalName.trim(), target_amount: isNaN(targetAmt) ? 1000 : targetAmt,
+      current_amount: 0, target_date: targetDate, goal_type: GOAL_TYPE_MAP[selectedGoal.type] ?? 'saving', status: 'in_progress',
     });
-    if (error) {
-      console.error('[Onboarding] Goal insert error:', error);
-      throw error;
-    }
+    if (error) { if (__DEV__) console.error('[Onboarding] Goal insert error:', error); throw error; }
   };
 
   const handleContinue = async () => {
@@ -190,560 +172,313 @@ export default function OnboardingScreen() {
       if (step === 0) await saveStep1();
       if (step === 1) await saveStep2();
       if (step === 2) await saveStep3();
-    } catch (e) {
-      console.error('[Onboarding] Save error:', e);
-    } finally {
-      setIsSaving(false);
-      advance();
-    }
+    } catch (e) { if (__DEV__) console.error('[Onboarding] Save error:', e); }
+    finally { setIsSaving(false); advance(); }
   };
 
-  const handleSkip = () => advance();
-
   const completeOnboarding = React.useCallback(async () => {
-    if (__DEV__) console.log('[Onboarding] completeOnboarding called, userId:', user?.id);
     if (!user?.id) return;
     try {
-      const { error } = await supabase
-        .from('profiles')
+      const { error } = await supabase.from('profiles')
         .upsert({ id: user.id, onboarding_complete: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: 'id' });
-      if (error) {
-        if (__DEV__) console.log('[Onboarding] DB upsert FAILED:', error);
-        return;
-      }
-      if (__DEV__) console.log('[Onboarding] DB upsert SUCCESS');
-      seedDefaultCategories(user.id).catch((e) =>
-        console.error('[Onboarding] Seed categories error (non-fatal):', e)
-      );
+      if (error) { if (__DEV__) console.log('[Onboarding] DB upsert FAILED:', error); return; }
+      seedDefaultCategories(user.id).catch(() => {});
       await refreshProfile();
-    } catch (e) {
-      if (__DEV__) console.log('[Onboarding] EXCEPTION:', e);
-    }
+    } catch (e) { if (__DEV__) console.log('[Onboarding] EXCEPTION:', e); }
   }, [user?.id, refreshProfile]);
 
-  // Completion: mark onboarding done first, then seed categories (non-blocking)
   useEffect(() => {
     if (step !== 3 || !user?.id) return;
     let mounted = true;
     (async () => {
-      try {
-        await completeOnboarding();
-      } catch (e) {
-        console.error('[Onboarding] Complete error:', e);
-      } finally {
-        if (mounted && __DEV__) console.log('[Onboarding] completeOnboarding done');
-      }
+      try { await completeOnboarding(); }
+      catch (e) { if (__DEV__) console.error('[Onboarding] Complete error:', e); }
+      finally { if (mounted && __DEV__) console.log('[Onboarding] done'); }
     })();
     return () => { mounted = false; };
   }, [step, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // --- Completion screen ---
+  // ── Completion screen ──
   if (step === 3) {
     const firstName = name.trim().split(/\s+/)[0] || null;
     return (
-      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
-        <View style={styles.completionContainer}>
-          <View style={styles.finniAvatarLarge}>
-            <Text style={styles.finniAvatarText}>F</Text>
+      <View style={s.root}>
+        <Aurora width={SW} height={SH} />
+        <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
+          <View style={s.completionContainer}>
+            <Orb size={104} rings talking />
+            <Text style={s.completionTitle}>You're all set{firstName ? `, ${firstName}` : ''}!</Text>
+            <Text style={s.completionSubtitle}>Let's start your financial journey.</Text>
+            {showFallback && (
+              <TouchableOpacity onPress={() => completeOnboarding()} activeOpacity={0.8}>
+                <LinearGradient colors={['#5EEAD4', '#A5B4FC']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.ctaGradient}>
+                  <Text style={s.ctaGradientText}>Get Started →</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
           </View>
-          <Text style={styles.completionTitle}>
-            You're all set{firstName ? `, ${firstName}` : ''}! 🚀
-          </Text>
-          <Text style={styles.completionSubtitle}>Let's start your financial journey.</Text>
-          {showFallback && (
-            <TouchableOpacity
-              style={styles.ctaButton}
-              onPress={() => completeOnboarding()}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.ctaText}>Get Started →</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </SafeAreaView>
+        </SafeAreaView>
+      </View>
     );
   }
 
+  const step0Valid = name.trim().length > 0;
+  const step1Valid = true; // income optional now
+  const canNext = step === 0 ? step0Valid : step === 1 ? step1Valid : true;
+
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        {/* Progress bar */}
-        <View style={styles.progressContainer}>
-          {step > 0 ? (
-            <TouchableOpacity onPress={retreat} style={styles.backBtn} hitSlop={12}>
-              <Text style={styles.backBtnText}>‹</Text>
+    <View style={s.root}>
+      <Aurora width={SW} height={SH} />
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          {/* Progress bar */}
+          <View style={s.progressRow}>
+            <TouchableOpacity
+              onPress={retreat}
+              style={[s.backBtn, { opacity: step > 0 ? 1 : 0 }]}
+              disabled={step === 0}
+              hitSlop={12}
+            >
+              <Text style={s.backBtnText}>‹</Text>
             </TouchableOpacity>
-          ) : (
-            <View style={styles.backBtnPlaceholder} />
-          )}
-          <View style={styles.progressBar}>
-            {[0, 1, 2].map((i) => (
-              <View
-                key={i}
-                style={[
-                  styles.progressSegment,
-                  i <= step && styles.progressSegmentActive,
-                  i < 2 && { marginRight: 8 },
-                ]}
-              />
-            ))}
+            <View style={s.progressBar}>
+              {[0, 1, 2].map((i) => (
+                <View key={i} style={[s.progressSegment, i < 2 && { marginRight: 7 }]}>
+                  {i <= step && (
+                    <LinearGradient
+                      colors={[t.auraAqua, t.auraViolet]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={s.progressFill}
+                    />
+                  )}
+                </View>
+              ))}
+            </View>
           </View>
-        </View>
 
-        <ScrollView
-          style={styles.flex}
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <Animated.View style={{ transform: [{ translateX: slideAnim }] }}>
-            {/* Finni chat bubble */}
-            <View style={styles.finniRow}>
-              <View style={styles.finniAvatar}>
-                <Text style={styles.finniAvatarText}>F</Text>
-              </View>
-              <View style={styles.finniMessageBubble}>
-                <Text style={styles.finniMessageText}>{STEP_MESSAGES[step]}</Text>
-              </View>
-            </View>
-
-            {/* ── Step 1: Who are you? ── */}
-            {step === 0 && (
-              <View style={styles.stepContent}>
-                <Text style={styles.fieldLabel}>What's your name? <Text style={{ color: t.red }}>*</Text></Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Your name"
-                  placeholderTextColor={t.text2}
-                  value={name}
-                  onChangeText={setName}
-                  autoCapitalize="words"
-                />
-
-                <Text style={styles.fieldLabel}>Where are you based? <Text style={{ color: t.red }}>*</Text></Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="City, Country (e.g. Dhaka, Bangladesh)"
-                  placeholderTextColor={t.text2}
-                  value={location}
-                  onChangeText={setLocation}
-                />
-
-                <Text style={styles.fieldLabel}>What currency do you use?</Text>
-                <View style={styles.pillRow}>
-                  {CURRENCIES.map((c) => (
-                    <TouchableOpacity
-                      key={c.code}
-                      style={[styles.pill, currency === c.code && styles.pillActive]}
-                      onPress={() => setCurrency(c.code)}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={[styles.pillText, currency === c.code && styles.pillTextActive]}>
-                        {c.code} ({c.symbol})
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            )}
-
-            {/* ── Step 2: Your finances ── */}
-            {step === 1 && (
-              <View style={styles.stepContent}>
-                <Text style={styles.fieldLabel}>
-                  What's your monthly income?{' '}
-                  <Text style={{ color: t.red }}>*</Text>
-                </Text>
-                <View style={styles.inputWithPrefix}>
-                  <Text style={styles.inputPrefix}>{currencySymbol}</Text>
-                  <TextInput
-                    style={styles.inputPrefixed}
-                    placeholder="0.00"
-                    placeholderTextColor={t.text2}
-                    value={incomeAmount}
-                    onChangeText={setIncomeAmount}
-                    keyboardType="decimal-pad"
-                  />
-                </View>
-                <TextInput
-                  style={[styles.input, { marginTop: 8 }]}
-                  placeholder="Label (e.g. Salary, Freelance)"
-                  placeholderTextColor={t.text2}
-                  value={incomeLabel}
-                  onChangeText={setIncomeLabel}
-                />
-
-                <Text style={[styles.fieldLabel, { marginTop: 20 }]}>
-                  What's your monthly spending budget?{' '}
-                  <Text style={styles.optional}>(optional)</Text>
-                </Text>
-                <View style={styles.inputWithPrefix}>
-                  <Text style={styles.inputPrefix}>{currencySymbol}</Text>
-                  <TextInput
-                    style={styles.inputPrefixed}
-                    placeholder="0.00"
-                    placeholderTextColor={t.text2}
-                    value={budget}
-                    onChangeText={(text) => {
-                      budgetManuallySet.current = true;
-                      setBudget(text);
-                    }}
-                    keyboardType="decimal-pad"
-                  />
-                </View>
-                {!budgetManuallySet.current && budget.length > 0 && (
-                  <Text style={styles.hint}>Pre-filled to 70% of your income</Text>
-                )}
-              </View>
-            )}
-
-            {/* ── Step 3: Your first goal ── */}
-            {step === 2 && (
-              <View style={styles.stepContent}>
-                <View style={styles.goalGrid}>
-                  {GOAL_CARDS.map((card) => {
-                    const active = selectedGoal?.type === card.type;
-                    return (
-                      <TouchableOpacity
-                        key={card.type}
-                        style={[styles.goalCard, active && styles.goalCardActive]}
-                        onPress={() => setSelectedGoal(card)}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={styles.goalEmoji}>{card.emoji}</Text>
-                        <Text style={[styles.goalLabel, active && styles.goalLabelActive]}>
-                          {card.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-
-                {selectedGoal && (
-                  <View style={styles.goalDetails}>
-                    <Text style={styles.fieldLabel}>Goal name</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={goalName}
-                      onChangeText={setGoalName}
-                      placeholder="e.g. Emergency fund"
-                      placeholderTextColor={t.text2}
-                    />
-                    <Text style={styles.fieldLabel}>
-                      Target amount <Text style={styles.optional}>(optional)</Text>
-                    </Text>
-                    <View style={styles.inputWithPrefix}>
-                      <Text style={styles.inputPrefix}>{currencySymbol}</Text>
-                      <TextInput
-                        style={styles.inputPrefixed}
-                        placeholder="0.00"
-                        placeholderTextColor={t.text2}
-                        value={targetAmount}
-                        onChangeText={setTargetAmount}
-                        keyboardType="decimal-pad"
-                      />
-                    </View>
-                    <Text style={styles.fieldLabel}>
-                      Deadline <Text style={styles.optional}>(optional, YYYY-MM-DD)</Text>
-                    </Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="e.g. 2026-12-31"
-                      placeholderTextColor={t.text2}
-                      value={deadline}
-                      onChangeText={setDeadline}
-                    />
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={s.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <Animated.View style={{ transform: [{ translateX: slideAnim }] }}>
+              {/* ── Step 1: About you ── */}
+              {step === 0 && (
+                <View style={s.stepContent}>
+                  <FinniSay>{STEP_MESSAGES[0]}</FinniSay>
+                  <View style={s.fieldGroup}>
+                    <Text style={s.fieldLabel}>What should I call you? <Text style={s.req}>•</Text></Text>
+                    <TextInput style={s.input} placeholder="Your name" placeholderTextColor={t.text3} value={name} onChangeText={setName} autoCapitalize="words" />
                   </View>
-                )}
-              </View>
-            )}
-          </Animated.View>
-        </ScrollView>
-
-        {/* Bottom actions */}
-        {(() => {
-          const step0Valid = name.trim().length > 0 && location.trim().length > 0;
-          const step1Valid = parseFloat(incomeAmount) > 0;
-          const ctaBlocked =
-            (step === 0 && !step0Valid) ||
-            (step === 1 && !step1Valid);
-          return (
-            <View style={styles.bottomActions}>
-              <TouchableOpacity
-                style={[styles.ctaButton, (isSaving || ctaBlocked) && styles.ctaDisabled]}
-                onPress={handleContinue}
-                disabled={isSaving || ctaBlocked}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.ctaText}>
-                  {isSaving ? 'Saving...' : step === 2 ? 'Set Goal & Finish' : 'Continue →'}
-                </Text>
-              </TouchableOpacity>
-              {step === 2 && (
-                <TouchableOpacity onPress={handleSkip} style={styles.skipButton}>
-                  <Text style={styles.skipText}>Set goals later</Text>
-                </TouchableOpacity>
+                  <View style={s.fieldGroup}>
+                    <Text style={s.fieldLabel}>Where are you based?</Text>
+                    <TextInput style={s.input} placeholder="City, Country (e.g. Dhaka, Bangladesh)" placeholderTextColor={t.text3} value={location} onChangeText={setLocation} />
+                  </View>
+                  <View style={s.fieldGroup}>
+                    <Text style={s.fieldLabel}>Which currency do you use?</Text>
+                    <View style={s.chipRow}>
+                      {CURRENCIES.map((c) => {
+                        const active = currency === c.code;
+                        return (
+                          <TouchableOpacity key={c.code} style={[s.chip, active && s.chipActive]} onPress={() => setCurrency(c.code)} activeOpacity={0.8}>
+                            <Text style={[s.chipText, active && s.chipTextActive]}>{c.code} ({c.symbol})</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                </View>
               )}
-            </View>
-          );
-        })()}
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+
+              {/* ── Step 2: Finances ── */}
+              {step === 1 && (
+                <View style={s.stepContent}>
+                  <FinniSay>{STEP_MESSAGES[1]}</FinniSay>
+                  <View style={s.fieldGroup}>
+                    <Text style={s.fieldLabel}>What's your monthly income? <Text style={s.req}>•</Text></Text>
+                    <View style={s.inputWithPrefix}>
+                      <Text style={s.inputPrefix}>{currencySymbol}</Text>
+                      <TextInput style={s.inputPrefixed} placeholder="0" placeholderTextColor={t.text3} value={incomeAmount} onChangeText={setIncomeAmount} keyboardType="decimal-pad" />
+                    </View>
+                  </View>
+                  <View style={s.fieldGroup}>
+                    <Text style={s.fieldLabel}>Give it a label</Text>
+                    <TextInput style={s.input} placeholder="e.g. Salary, Freelance" placeholderTextColor={t.text3} value={incomeLabel} onChangeText={setIncomeLabel} />
+                  </View>
+                  <View style={s.fieldGroup}>
+                    <Text style={s.fieldLabel}>Monthly spending budget <Text style={s.optional}>(optional)</Text></Text>
+                    <View style={s.inputWithPrefix}>
+                      <Text style={s.inputPrefix}>{currencySymbol}</Text>
+                      <TextInput style={s.inputPrefixed} placeholder="0" placeholderTextColor={t.text3} value={budget}
+                        onChangeText={(v) => { budgetManuallySet.current = true; setBudget(v); }} keyboardType="decimal-pad" />
+                    </View>
+                    {/* Auto-budget tip */}
+                    <View style={s.tipBox}>
+                      <Text style={{ color: t.auraAqua, fontSize: 17 }}>✨</Text>
+                      <Text style={s.tipText}>Leave this blank and I'll calculate a healthy budget from your income automatically.</Text>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {/* ── Step 3: Goal ── */}
+              {step === 2 && (
+                <View style={s.stepContent}>
+                  <FinniSay>{STEP_MESSAGES[2]}</FinniSay>
+                  <View style={s.goalGrid}>
+                    {GOAL_CARDS.map((card) => {
+                      const active = selectedGoal?.type === card.type;
+                      return (
+                        <TouchableOpacity
+                          key={card.type}
+                          style={[s.goalCard, active && { borderColor: card.color + '8C', backgroundColor: card.color + '18' }]}
+                          onPress={() => setSelectedGoal(card)}
+                          activeOpacity={0.8}
+                        >
+                          <View style={[s.goalIconBox, { backgroundColor: card.color + '2E', borderColor: card.color + '4D' }]}>
+                            <Text style={{ fontSize: 22 }}>{card.emoji}</Text>
+                          </View>
+                          <Text style={[s.goalLabel, active && { color: '#fff' }]}>{card.label}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+
+                  {selectedGoal && (
+                    <View style={s.goalDetails}>
+                      <View style={s.fieldGroup}>
+                        <Text style={s.fieldLabel}>Goal name</Text>
+                        <TextInput style={s.input} value={goalName} onChangeText={setGoalName} placeholder="Name your goal" placeholderTextColor={t.text3} />
+                      </View>
+                      <View style={s.fieldGroup}>
+                        <Text style={s.fieldLabel}>Target amount <Text style={s.optional}>(optional)</Text></Text>
+                        <View style={s.inputWithPrefix}>
+                          <Text style={s.inputPrefix}>{currencySymbol}</Text>
+                          <TextInput style={s.inputPrefixed} placeholder="0" placeholderTextColor={t.text3} value={targetAmount} onChangeText={setTargetAmount} keyboardType="decimal-pad" />
+                        </View>
+                      </View>
+                      <View style={s.fieldGroup}>
+                        <Text style={s.fieldLabel}>Deadline <Text style={s.optional}>(optional, YYYY-MM-DD)</Text></Text>
+                        <TextInput style={s.input} placeholder="e.g. 2026-12-31" placeholderTextColor={t.text3} value={deadline} onChangeText={setDeadline} />
+                      </View>
+                    </View>
+                  )}
+                </View>
+              )}
+            </Animated.View>
+          </ScrollView>
+
+          {/* Bottom CTA */}
+          <View style={s.bottomActions}>
+            <TouchableOpacity
+              onPress={handleContinue}
+              disabled={isSaving || !canNext}
+              activeOpacity={0.8}
+            >
+              <LinearGradient
+                colors={['#5EEAD4', '#A5B4FC']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[s.ctaGradient, (!canNext || isSaving) && { opacity: 0.5 }]}
+              >
+                <Text style={s.ctaGradientText}>
+                  {isSaving ? 'Saving...' : step === 2 ? 'Set goal & finish' : 'Continue'}
+                </Text>
+                {!isSaving && <Text style={{ fontSize: 18, color: '#0b0a1a' }}>→</Text>}
+              </LinearGradient>
+            </TouchableOpacity>
+            {step === 2 && (
+              <TouchableOpacity onPress={() => advance()} style={s.skipButton}>
+                <Text style={s.skipText}>Set up goals later</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: t.auraBg,
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: t.auraBg },
+
+  // Progress
+  progressRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 22, paddingTop: 12, paddingBottom: 8,
   },
-  flex: {
-    flex: 1,
-  },
-  progressContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 8,
-  },
-  backBtn: {
-    width: 32,
-    marginRight: 12,
-    alignItems: 'flex-start',
-  },
-  backBtnText: {
-    fontSize: 30,
-    color: t.auraIndigo,
-    fontWeight: '600',
-    lineHeight: 34,
-  },
-  backBtnPlaceholder: {
-    width: 44,
-  },
-  progressBar: {
-    flex: 1,
-    flexDirection: 'row',
-  },
-  progressSegment: {
-    flex: 1,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: t.glassLine,
-  },
-  progressSegmentActive: {
-    backgroundColor: t.auraIndigo,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-  },
-  finniRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    marginTop: 24,
-    marginBottom: 28,
-    gap: 12,
-  },
-  finniAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: t.auraIndigo,
-    justifyContent: 'center',
-    alignItems: 'center',
-    flexShrink: 0,
-  },
-  finniAvatarLarge: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: t.auraIndigo,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  finniAvatarText: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
+  backBtn: { width: 38, height: 38, borderRadius: t.rPill, backgroundColor: t.glass, borderWidth: 1, borderColor: t.glassLine, alignItems: 'center', justifyContent: 'center' },
+  backBtnText: { fontSize: 26, color: t.text, fontWeight: '600', lineHeight: 30 },
+  progressBar: { flex: 1, flexDirection: 'row' },
+  progressSegment: { flex: 1, height: 4, borderRadius: 99, backgroundColor: t.glass, overflow: 'hidden' },
+  progressFill: { flex: 1, borderRadius: 99 },
+
+  // Content
+  scrollContent: { paddingHorizontal: 22, paddingBottom: 24 },
+  stepContent: { gap: 22 },
+  fieldGroup: { gap: 0 },
+
+  // Finni bubble
+  finniRow: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
   finniMessageBubble: {
-    flex: 1,
-    backgroundColor: t.glass2,
-    borderWidth: 1,
-    borderColor: t.glassLine,
-    borderRadius: 16,
-    borderBottomLeftRadius: 4,
-    padding: 16,
+    flex: 1, padding: 14, paddingHorizontal: 17,
+    borderTopLeftRadius: 8, borderTopRightRadius: 22, borderBottomRightRadius: 22, borderBottomLeftRadius: 22,
   },
-  finniMessageText: {
-    fontSize: 15,
-    color: t.text,
-    lineHeight: 22,
-    fontWeight: '500',
-  },
-  stepContent: {
-    gap: 4,
-  },
-  fieldLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: t.text,
-    marginBottom: 8,
-    marginTop: 12,
-  },
-  optional: {
-    color: t.text2,
-    fontWeight: '400',
-  },
+  finniMessageText: { fontSize: 15, fontFamily: fonts.medium, fontWeight: '500', color: t.text, lineHeight: 23 },
+
+  // Fields
+  fieldLabel: { fontSize: 14.5, fontFamily: fonts.bold, fontWeight: '700', color: t.text, marginBottom: 10, marginLeft: 2, letterSpacing: -0.2 },
+  req: { color: t.auraRose, fontSize: 14 },
+  optional: { color: t.text3, fontWeight: '400', fontSize: 12.5 },
   input: {
-    backgroundColor: t.glass2,
-    borderWidth: 1,
-    borderColor: t.glassLine,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: t.text,
+    backgroundColor: t.glass2, borderWidth: 1, borderColor: t.glassLine, borderRadius: t.rMd,
+    paddingHorizontal: 18, paddingVertical: 16, fontSize: 16, fontFamily: fonts.medium, color: t.text,
   },
   inputWithPrefix: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: t.glass2,
-    borderWidth: 1,
-    borderColor: t.glassLine,
-    borderRadius: 12,
+    flexDirection: 'row', alignItems: 'center', backgroundColor: t.glass2, borderWidth: 1, borderColor: t.glassLine, borderRadius: t.rMd,
   },
-  inputPrefix: {
-    fontSize: 18,
-    color: t.text2,
-    paddingLeft: 16,
-    paddingRight: 8,
-    fontWeight: '600',
+  inputPrefix: { fontSize: 18, fontFamily: fonts.semiBold, fontWeight: '600', color: t.text2, paddingLeft: 18, paddingRight: 8 },
+  inputPrefixed: { flex: 1, paddingVertical: 16, paddingRight: 18, fontSize: 16, fontFamily: fonts.medium, color: t.text },
+
+  // Tip box
+  tipBox: {
+    flexDirection: 'row', gap: 9, marginTop: 12, padding: 12, paddingHorizontal: 14,
+    borderRadius: t.rMd, backgroundColor: t.glass, borderWidth: 1, borderColor: t.glassLine,
   },
-  inputPrefixed: {
-    flex: 1,
-    paddingVertical: 14,
-    paddingRight: 16,
-    fontSize: 16,
-    color: t.text,
-  },
-  hint: {
-    fontSize: 12,
-    color: t.text2,
-    marginTop: 6,
-    marginLeft: 4,
-  },
-  pillRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  pill: {
-    backgroundColor: t.glass2,
-    borderWidth: 1,
-    borderColor: t.glassLine,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  pillActive: {
-    backgroundColor: t.auraIndigo,
-    borderColor: t.auraIndigo,
-  },
-  pillText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: t.text2,
-  },
-  pillTextActive: {
-    color: '#FFFFFF',
-  },
-  goalGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 8,
-  },
+  tipText: { flex: 1, fontSize: 13, fontFamily: fonts.medium, fontWeight: '500', color: t.text2, lineHeight: 19.5 },
+
+  // Chips
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
+  chip: { backgroundColor: t.glass2, borderWidth: 1, borderColor: t.glassLine, borderRadius: t.rPill, paddingHorizontal: 14, paddingVertical: 10 },
+  chipActive: { backgroundColor: t.auraIndigo, borderColor: t.auraIndigo },
+  chipText: { fontSize: 14, fontFamily: fonts.semiBold, fontWeight: '600', color: t.text2 },
+  chipTextActive: { color: '#fff' },
+
+  // Goals
+  goalGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 11, marginBottom: 8 },
   goalCard: {
-    width: '47%',
-    backgroundColor: t.glass2,
-    borderWidth: 1,
-    borderColor: t.glassLine,
-    borderRadius: 16,
-    padding: 20,
-    alignItems: 'center',
-    gap: 8,
+    width: '47%', backgroundColor: t.glass2, borderWidth: 1, borderColor: t.glassLine, borderRadius: t.rLg,
+    padding: 16, alignItems: 'flex-start', gap: 12,
   },
-  goalCardActive: {
-    borderColor: t.auraIndigo,
-    backgroundColor: 'rgba(99, 102, 241, 0.12)',
+  goalIconBox: {
+    width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center', borderWidth: 1,
   },
-  goalEmoji: {
-    fontSize: 32,
+  goalLabel: { fontSize: 15, fontFamily: fonts.bold, fontWeight: '700', color: t.text },
+  goalDetails: { gap: 18 },
+
+  // Bottom
+  bottomActions: { paddingHorizontal: 22, paddingBottom: 8, paddingTop: 12 },
+  ctaGradient: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9,
+    paddingVertical: 17, borderRadius: t.rMd,
   },
-  goalLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: t.text2,
-    textAlign: 'center',
-  },
-  goalLabelActive: {
-    color: t.auraIndigo,
-  },
-  goalDetails: {
-    marginTop: 8,
-    gap: 4,
-  },
-  bottomActions: {
-    paddingHorizontal: 20,
-    paddingBottom: 8,
-    paddingTop: 12,
-    gap: 8,
-  },
-  ctaButton: {
-    backgroundColor: t.auraIndigo,
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  ctaDisabled: {
-    opacity: 0.6,
-  },
-  ctaText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  skipButton: {
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  skipText: {
-    fontSize: 14,
-    color: t.text2,
-  },
-  completionContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 40,
-    gap: 16,
-  },
-  completionTitle: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: t.text,
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  completionSubtitle: {
-    fontSize: 16,
-    color: t.text2,
-    textAlign: 'center',
-  },
+  ctaGradientText: { fontSize: 17, fontFamily: fonts.bold, fontWeight: '700', color: '#0b0a1a' },
+  skipButton: { alignItems: 'center', paddingVertical: 10, marginTop: 4 },
+  skipText: { fontSize: 14.5, fontFamily: fonts.semiBold, fontWeight: '600', color: t.text3 },
+
+  // Completion
+  completionContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 40, gap: 16 },
+  completionTitle: { fontSize: 28, fontFamily: fonts.extraBold, fontWeight: '800', color: t.text, textAlign: 'center', marginTop: 16 },
+  completionSubtitle: { fontSize: 16, fontFamily: fonts.regular, color: t.text2, textAlign: 'center' },
 });
