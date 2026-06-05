@@ -3,7 +3,16 @@ import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Sentry from '@sentry/react-native';
+import {
+  useFonts,
+  PlusJakartaSans_400Regular,
+  PlusJakartaSans_500Medium,
+  PlusJakartaSans_600SemiBold,
+  PlusJakartaSans_700Bold,
+  PlusJakartaSans_800ExtraBold,
+} from '@expo-google-fonts/plus-jakarta-sans';
 import { AuthProvider } from './src/contexts/AuthContext';
 import { ProfileProvider } from './src/contexts/ProfileContext';
 import AppNavigator from './src/navigation/AppNavigator';
@@ -77,8 +86,20 @@ const errorStyles = StyleSheet.create({
 });
 
 function App() {
+  const [fontsLoaded] = useFonts({
+    'PlusJakartaSans': PlusJakartaSans_400Regular,
+    'PlusJakartaSans-Medium': PlusJakartaSans_500Medium,
+    'PlusJakartaSans-SemiBold': PlusJakartaSans_600SemiBold,
+    'PlusJakartaSans-Bold': PlusJakartaSans_700Bold,
+    'PlusJakartaSans-ExtraBold': PlusJakartaSans_800ExtraBold,
+  });
+
+  // Hold the native splash screen until fonts are ready
+  if (!fontsLoaded) return null;
+
   return (
     <GestureHandlerRootView style={styles.container}>
+      <SafeAreaProvider>
       <ErrorBoundary>
         <AuthProvider>
           <ProfileProvider>
@@ -89,6 +110,7 @@ function App() {
           </ProfileProvider>
         </AuthProvider>
       </ErrorBoundary>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }

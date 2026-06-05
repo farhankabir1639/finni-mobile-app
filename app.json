@@ -55,7 +55,8 @@
           "photosPermission": "Finni uses your photo library to scan receipts and extract transactions automatically.",
           "cameraPermission": "Finni uses the camera to photograph receipts and extract transactions automatically."
         }
-      ]
+      ],
+      "expo-web-browser"
     ]
   }
 }

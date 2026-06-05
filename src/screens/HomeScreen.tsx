@@ -1,63 +1,59 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
-  Pressable,
-  KeyboardAvoidingView,
-  Platform,
-  Modal,
-  Alert,
-  ActionSheetIOS,
-  Linking,
+  View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity,
+  Pressable, KeyboardAvoidingView, Platform, Modal, Alert,
+  ActionSheetIOS, Linking, Animated, useWindowDimensions,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import Svg, { Path, Circle as SvgCircle } from 'react-native-svg';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfile } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
-import { colors } from '../lib/theme';
-import { chatAgent, parseTransactionsFromImage, saveImageTransactions, checkImageTxLimit, markImageTxUsed } from '../lib/agents';
+import {
+  chatAgent, parseTransactionsFromImage, saveImageTransactions,
+  checkImageTxLimit, markImageTxUsed,
+} from '../lib/agents';
 import { seedDefaultCategories } from '../lib/seedCategories';
 import { captureError } from '../lib/sentry';
 import { trackEvent, trackScreen } from '../lib/analytics';
 import {
-  loadTodaySession,
-  saveSession,
-  loadAllSessions,
-  formatSessionDate,
-  formatMessageTime,
-  todayDateStr,
-  type SessionMessage,
-  type ChatSession,
+  loadTodaySession, saveSession, loadAllSessions, formatSessionDate,
+  formatMessageTime, todayDateStr, type SessionMessage, type ChatSession,
 } from '../lib/chatSessions';
+import Aurora from '../components/Aurora';
+import Orb from '../components/Orb';
+import ArcMeter from '../components/ArcMeter';
+import GlassCard from '../components/GlassCard';
+import { t, fonts } from '../theme/tokens';
 
+// ── Types ─────────────────────────────────────────────────────────────────────
 type Message = { id: string; role: 'user' | 'assistant'; content: string; timestamp?: string };
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function getGreetingBase(): string {
-  const hour = new Date().getHours();
-  if (hour < 12) return 'Good morning';
-  if (hour < 17) return 'Good afternoon';
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
   return 'Good evening';
 }
-
-function getFirstName(fullName: string | null | undefined): string | null {
-  if (!fullName?.trim()) return null;
-  return fullName.trim().split(/\s+/)[0] ?? null;
+function getFirstName(n: string | null | undefined): string | null {
+  if (!n?.trim()) return null;
+  return n.trim().split(/\s+/)[0] ?? null;
 }
-
-function formatDate(date: Date): string {
-  return date.toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-  });
+function formatDate(d: Date): string {
+  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+}
+function daysInMonth(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+}
+function fmtRecTime(s: number): string {
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 }
 
 const QUICK_CHIPS = [
@@ -67,385 +63,377 @@ const QUICK_CHIPS = [
   '📝 Log expense',
 ];
 
+// ── SVG Icons ─────────────────────────────────────────────────────────────────
+const ClockIcon = ({ color = t.text2 }: { color?: string }) => (
+  <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+    <SvgCircle cx="12" cy="12" r="9" stroke={color} strokeWidth="1.8" />
+    <Path d="M12 7v5l3 3" stroke={color} strokeWidth="1.8" strokeLinecap="round" />
+  </Svg>
+);
+const CameraIcon = ({ color = t.text2 }: { color?: string }) => (
+  <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+    <Path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" stroke={color} strokeWidth="1.7" strokeLinecap="round" />
+    <SvgCircle cx="12" cy="13" r="4" stroke={color} strokeWidth="1.7" />
+  </Svg>
+);
+const MicIcon = ({ color = t.text2 }: { color?: string }) => (
+  <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+    <Path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" stroke={color} strokeWidth="1.7" />
+    <Path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" stroke={color} strokeWidth="1.7" strokeLinecap="round" />
+  </Svg>
+);
+const SendIcon = ({ active }: { active: boolean }) => (
+  <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+    <Path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" stroke={active ? t.auraBg : t.text3} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+const ThumbUpIcon  = ({ active }: { active: boolean }) => (
+  <Svg width={15} height={15} viewBox="0 0 24 24" fill="none">
+    <Path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z" stroke={active ? t.green : t.text3} strokeWidth="1.7" strokeLinecap="round" />
+    <Path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" stroke={active ? t.green : t.text3} strokeWidth="1.7" strokeLinecap="round" />
+  </Svg>
+);
+const ThumbDownIcon = ({ active }: { active: boolean }) => (
+  <Svg width={15} height={15} viewBox="0 0 24 24" fill="none">
+    <Path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z" stroke={active ? t.red : t.text3} strokeWidth="1.7" strokeLinecap="round" />
+    <Path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" stroke={active ? t.red : t.text3} strokeWidth="1.7" strokeLinecap="round" />
+  </Svg>
+);
+const RetryIcon = () => (
+  <Svg width={15} height={15} viewBox="0 0 24 24" fill="none">
+    <Path d="M3 2v6h6M21 12A9 9 0 0 0 6 5.3L3 8M21 22v-6h-6M3 12a9 9 0 0 0 15 6.7l3-2.7" stroke={t.text3} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+const FlagIcon = () => (
+  <Svg width={15} height={15} viewBox="0 0 24 24" fill="none">
+    <Path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7" stroke={t.text3} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+// ── AI Action Row ─────────────────────────────────────────────────────────────
+function AIActionRow({ msg, onRegenerate, onReport }: {
+  msg: Message; onRegenerate: () => void; onReport: () => void;
+}) {
+  const [thumbed, setThumbed] = useState<'up' | 'down' | null>(null);
+  return (
+    <View style={aiStyles.row}>
+      <TouchableOpacity style={aiStyles.btn} hitSlop={8} activeOpacity={0.7}
+        onPress={() => { setThumbed('up'); trackEvent('ai_thumbs_up', { msgId: msg.id }); }}>
+        <ThumbUpIcon active={thumbed === 'up'} />
+      </TouchableOpacity>
+      <TouchableOpacity style={aiStyles.btn} hitSlop={8} activeOpacity={0.7}
+        onPress={() => { setThumbed('down'); trackEvent('ai_thumbs_down', { msgId: msg.id }); }}>
+        <ThumbDownIcon active={thumbed === 'down'} />
+      </TouchableOpacity>
+      <TouchableOpacity style={aiStyles.btn} hitSlop={8} activeOpacity={0.7}
+        onPress={() => { onRegenerate(); trackEvent('ai_regenerate', { msgId: msg.id }); }}>
+        <RetryIcon />
+      </TouchableOpacity>
+      <TouchableOpacity style={aiStyles.btn} hitSlop={8} activeOpacity={0.7} onPress={onReport}>
+        <FlagIcon />
+      </TouchableOpacity>
+    </View>
+  );
+}
+const aiStyles = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 6, marginLeft: 2 },
+  btn: { padding: 4 },
+});
+
+// ── Main Screen ───────────────────────────────────────────────────────────────
 export default function HomeScreen() {
   const navigation = useNavigation();
+  const { width, height } = useWindowDimensions();
   const { user } = useAuth();
   const { currencySymbol } = useProfile();
-  const [firstName, setFirstName] = useState<string | null>(null);
+
+  const [firstName, setFirstName]         = useState<string | null>(null);
   const [profileLoaded, setProfileLoaded] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [inputText, setInputText] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  const [typingDots, setTypingDots] = useState('.');
-  const [todaySpent, setTodaySpent] = useState(0);
-  const [monthUsedPct, setMonthUsedPct] = useState(0);
-  const [budgetLeft, setBudgetLeft] = useState(0);
-  const [chatContext, setChatContext] = useState<{
+  const [messages, setMessages]           = useState<Message[]>([]);
+  const [inputText, setInputText]         = useState('');
+  const [isTyping, setIsTyping]           = useState(false);
+  const [typingDots, setTypingDots]       = useState('.');
+  const [monthUsedPct, setMonthUsedPct]   = useState(0);
+  const [budgetLeft, setBudgetLeft]       = useState(0);
+  const [chatContext, setChatContext]     = useState<{
     profile?: { name?: string; currency?: string } | null;
     categories?: { id: string; name: string; emoji?: string; budget?: number; spent?: number }[] | null;
     recentTransactions?: { withdrawal?: number; deposit?: number; description: string | null; category_id?: string | null; date: string; type?: string }[] | null;
     goals?: { name: string; target_amount?: number; current_amount?: number }[] | null;
   }>({});
-  const [showHistory, setShowHistory] = useState(false);
-  const [historySessions, setHistorySessions] = useState<ChatSession[]>([]);
+  const [showHistory, setShowHistory]           = useState(false);
+  const [historySessions, setHistorySessions]   = useState<ChatSession[]>([]);
   const [activeSessionDate, setActiveSessionDate] = useState<string | null>(null);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
-  const scrollRef = useRef<ScrollView>(null);
-  const welcomeAddedRef = useRef(false);
-  const isSendingRef = useRef(false);
-  const isFetchingContextRef = useRef(false);
+  const [isRecording, setIsRecording]           = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
 
+  const scrollRef         = useRef<ScrollView>(null);
+  const welcomeAddedRef   = useRef(false);
+  const isSendingRef      = useRef(false);
+  const isFetchingCtxRef  = useRef(false);
+  const recordingTimer    = useRef<ReturnType<typeof setInterval> | null>(null);
+  const waveAnims         = useRef([...Array(5)].map(() => new Animated.Value(0.4))).current;
+  const waveLoopsRef      = useRef<Animated.CompositeAnimation[]>([]);
+
+  // ── Derived ────────────────────────────────────────────────────────────────
+  const today           = new Date();
+  const monthElapsedPct = Math.round((today.getDate() / daysInMonth(today)) * 100);
+  const onTrack         = monthUsedPct <= monthElapsedPct;
+  const greeting        = firstName ? `${getGreetingBase()}, ${firstName}` : getGreetingBase();
+
+  const finnisNoticed = useMemo(() => {
+    const cats = chatContext.categories;
+    if (!cats?.length) return null;
+    const top = cats
+      .filter(c => c.budget && c.budget > 0 && c.spent && c.spent > 0)
+      .map(c => ({ ...c, ratio: (c.spent ?? 0) / c.budget! }))
+      .sort((a, b) => b.ratio - a.ratio)[0];
+    if (!top || top.ratio < 0.7) return null;
+    const pct = Math.round(top.ratio * 100);
+    if (pct >= 100) return `${top.emoji ?? ''} ${top.name} exceeded budget this month`.trim();
+    return `${top.emoji ?? ''} ${top.name} is at ${pct}% of budget this month`.trim();
+  }, [chatContext.categories]);
+
+  // ── Waveform ───────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (isRecording) {
+      const peaks     = [0.9, 0.5, 1.0, 0.6, 0.8];
+      const troughs   = [0.25, 0.35, 0.2, 0.3, 0.35];
+      const durations = [280, 350, 220, 310, 260];
+      waveLoopsRef.current = waveAnims.map((anim, i) =>
+        Animated.loop(Animated.sequence([
+          Animated.timing(anim, { toValue: peaks[i],   duration: durations[i],      useNativeDriver: true }),
+          Animated.timing(anim, { toValue: troughs[i], duration: durations[i] + 40, useNativeDriver: true }),
+        ]))
+      );
+      waveLoopsRef.current.forEach((loop, i) => setTimeout(() => loop.start(), i * 55));
+    } else {
+      waveLoopsRef.current.forEach(l => l.stop());
+      waveAnims.forEach(a => a.setValue(0.4));
+    }
+    return () => waveLoopsRef.current.forEach(l => l.stop());
+  }, [isRecording]);
+
+  const startRecording = () => {
+    setIsRecording(true);
+    setRecordingSeconds(0);
+    recordingTimer.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000);
+    trackEvent('voice_input_started');
+  };
+  const stopRecording = () => {
+    setIsRecording(false);
+    setRecordingSeconds(0);
+    if (recordingTimer.current) { clearInterval(recordingTimer.current); recordingTimer.current = null; }
+  };
+
+  // ── Data fetching ──────────────────────────────────────────────────────────
   const fetchChatContext = useCallback(async () => {
-    if (!user?.id || isFetchingContextRef.current) return;
-    isFetchingContextRef.current = true;
+    if (!user?.id || isFetchingCtxRef.current) return;
+    isFetchingCtxRef.current = true;
     try {
-      const [profileRes, categoriesRes, txRes, goalsRes] = await Promise.all([
+      const [pr, cr, tr, gr] = await Promise.all([
         supabase.from('profiles').select('name, currency').eq('id', user.id).maybeSingle(),
         supabase.from('categories').select('id, name, emoji, budget, spent').eq('user_id', user.id),
         supabase.from('transactions').select('withdrawal, deposit, description, category_id, date, type').eq('user_id', user.id).order('date', { ascending: false }).limit(10),
         supabase.from('financial_goals').select('name, target_amount, current_amount').eq('user_id', user.id),
       ]);
-      if (profileRes.error) { console.error('[HomeScreen] Profile fetch error:', profileRes.error); captureError(profileRes.error, { context: 'fetchChatContext.profile' }); }
-      if (categoriesRes.error) { console.error('[HomeScreen] Categories fetch error:', categoriesRes.error); captureError(categoriesRes.error, { context: 'fetchChatContext.categories' }); }
-      if (txRes.error) { console.error('[HomeScreen] Transactions fetch error:', txRes.error); captureError(txRes.error, { context: 'fetchChatContext.transactions' }); }
-      if (goalsRes.error) { console.error('[HomeScreen] Goals fetch error:', goalsRes.error); captureError(goalsRes.error, { context: 'fetchChatContext.goals' }); }
+      if (pr.error) captureError(pr.error, { context: 'fetchCtx.profile' });
+      if (cr.error) captureError(cr.error, { context: 'fetchCtx.categories' });
+      if (tr.error) captureError(tr.error, { context: 'fetchCtx.transactions' });
+      if (gr.error) captureError(gr.error, { context: 'fetchCtx.goals' });
       setChatContext({
-        profile: profileRes.data ? { name: profileRes.data.name, currency: profileRes.data.currency } : null,
-        categories: (categoriesRes.data as { id: string; name: string; emoji?: string; budget?: number; spent?: number }[]) ?? [],
-        recentTransactions: (txRes.data as { withdrawal?: number; deposit?: number; description: string | null; category_id?: string | null; date: string; type?: string }[]) ?? [],
-        goals: (goalsRes.data as { name: string; target_amount?: number; current_amount?: number }[]) ?? [],
+        profile: pr.data ? { name: pr.data.name, currency: pr.data.currency } : null,
+        categories: (cr.data as { id: string; name: string; emoji?: string; budget?: number; spent?: number }[]) ?? [],
+        recentTransactions: (tr.data as { withdrawal?: number; deposit?: number; description: string | null; category_id?: string | null; date: string; type?: string }[]) ?? [],
+        goals: (gr.data as { name: string; target_amount?: number; current_amount?: number }[]) ?? [],
       });
     } catch (e) {
-      console.error('[HomeScreen] fetchChatContext error:', e);
       captureError(e, { context: 'fetchChatContext' });
       setChatContext({});
-    } finally {
-      isFetchingContextRef.current = false;
-    }
+    } finally { isFetchingCtxRef.current = false; }
   }, [user?.id]);
 
-  useFocusEffect(
-    React.useCallback(() => {
-      fetchChatContext();
-    }, [fetchChatContext])
-  );
+  useFocusEffect(React.useCallback(() => { fetchChatContext(); }, [fetchChatContext]));
 
   const fetchStats = useCallback(async () => {
     if (!user?.id) return;
     try {
       const now = new Date();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-      const [{ data: txData }, { data: profileData }, { data: incomeData }] = await Promise.all([
-        supabase.from('transactions').select('withdrawal, deposit, date, type').eq('user_id', user.id).gte('date', monthStart),
-        Promise.resolve({ data: null }),
+      const [{ data: txData }, { data: incomeData }] = await Promise.all([
+        supabase.from('transactions').select('withdrawal, type').eq('user_id', user.id).gte('date', monthStart),
         supabase.from('income').select('amount, frequency').eq('user_id', user.id),
       ]);
-      let todayTotal = 0;
       let monthTotal = 0;
-      (txData ?? []).forEach((t) => {
-        if (t.type === 'expense') {
-          const w = Number(t.withdrawal) || 0;
-          if (t.date >= todayStart) todayTotal += w;
-          monthTotal += w;
-        }
-      });
-      setTodaySpent(todayTotal);
-
+      (txData ?? []).forEach(tx => { if (tx.type === 'expense') monthTotal += Number(tx.withdrawal) || 0; });
       const monthlyIncome = (incomeData ?? []).reduce((sum, r) => {
-        const amt = Number(r.amount) || 0;
-        if (r.frequency === 'weekly') return sum + amt * (52 / 12);
-        if (r.frequency === 'annual') return sum + amt / 12;
-        return sum + amt;
+        const a = Number(r.amount) || 0;
+        if (r.frequency === 'weekly') return sum + a * (52 / 12);
+        if (r.frequency === 'annual') return sum + a / 12;
+        return sum + a;
       }, 0);
-
-      const base = monthlyIncome;
-      setMonthUsedPct(base > 0 ? Math.min(100, Math.round((monthTotal / base) * 100)) : 0);
-      setBudgetLeft(Math.max(0, base - monthTotal));
-    } catch (e) {
-      console.error('[HomeScreen] fetchStats error:', e);
-      captureError(e, { context: 'fetchStats' });
-    }
+      setMonthUsedPct(monthlyIncome > 0 ? Math.min(100, Math.round((monthTotal / monthlyIncome) * 100)) : 0);
+      setBudgetLeft(Math.max(0, monthlyIncome - monthTotal));
+    } catch (e) { captureError(e, { context: 'fetchStats' }); }
   }, [user?.id]);
 
-  useFocusEffect(
-    React.useCallback(() => {
-      fetchStats();
-      trackScreen('HomeScreen');
-    }, [fetchStats])
-  );
+  useFocusEffect(React.useCallback(() => { fetchStats(); trackScreen('HomeScreen'); }, [fetchStats]));
 
-  const today = new Date();
-  const greeting = (() => {
-    const base = getGreetingBase();
-    return firstName ? `${base}, ${firstName}! 👋` : `${base}! 👋`;
-  })();
-
+  // ── Profile / welcome ──────────────────────────────────────────────────────
   useEffect(() => {
-    if (!user?.id) {
-      setProfileLoaded(true);
-      return;
-    }
-    const loadProfile = async () => {
+    if (!user?.id) { setProfileLoaded(true); return; }
+    (async () => {
       try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('name')
-          .eq('id', user.id)
-          .maybeSingle();
+        const { data, error } = await supabase.from('profiles').select('name').eq('id', user.id).maybeSingle();
         if (error?.code === 'PGRST116') {
-          const defaultName = user.email?.split('@')[0] ?? 'User';
-          await supabase.from('profiles').upsert({ id: user.id, name: defaultName });
+          const name = user.email?.split('@')[0] ?? 'User';
+          await supabase.from('profiles').upsert({ id: user.id, name });
           await seedDefaultCategories(user.id);
-          setFirstName(getFirstName(defaultName));
+          setFirstName(getFirstName(name));
         } else {
           setFirstName(getFirstName(data?.name));
         }
-      } catch {
-        setFirstName(null);
-      } finally {
-        setProfileLoaded(true);
-      }
-    };
-    loadProfile();
+      } catch { setFirstName(null); }
+      finally { setProfileLoaded(true); }
+    })();
   }, [user?.id]);
 
   useEffect(() => {
     if (!welcomeAddedRef.current && profileLoaded && user?.id) {
       welcomeAddedRef.current = true;
       const name = firstName ?? 'there';
-      loadTodaySession(user.id).then((saved) => {
-        if (saved && saved.length > 0) {
-          setMessages(saved as Message[]);
-        } else {
-          setMessages([
-            {
-              id: 'welcome',
-              role: 'assistant',
-              content: `Hi ${name}! 👋 I'm Finni. Ask me anything about your finances or just say 'spent $X on Y' to log expenses`,
-            },
-          ]);
-        }
+      loadTodaySession(user.id).then(saved => {
+        if (saved?.length) setMessages(saved as Message[]);
+        else setMessages([{ id: 'welcome', role: 'assistant', content: `Hi ${name}! 👋 I'm Finni. Ask me anything about your finances or just say 'spent $X on Y' to log expenses` }]);
       });
     }
   }, [profileLoaded, firstName, user?.id]);
 
-  useEffect(() => {
-    scrollRef.current?.scrollToEnd({ animated: true });
-  }, [messages, isTyping]);
+  useEffect(() => { scrollRef.current?.scrollToEnd({ animated: true }); }, [messages, isTyping]);
 
   useEffect(() => {
     if (!isTyping) return;
-    const id = setInterval(() => {
-      setTypingDots((d) => (d.length >= 3 ? '.' : d + '.'));
-    }, 400);
+    const id = setInterval(() => setTypingDots(d => d.length >= 3 ? '.' : d + '.'), 400);
     return () => clearInterval(id);
   }, [isTyping]);
 
+  // ── Handlers ───────────────────────────────────────────────────────────────
   const handleSend = async (text: string) => {
     const trimmed = text.trim().replace(/[\x00-\x1F\x7F]/g, '');
     if (!trimmed || !user?.id || isSendingRef.current) return;
     isSendingRef.current = true;
-
-    const now = new Date().toISOString();
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: trimmed,
-      timestamp: now,
-    };
-    setMessages((m) => [...m, userMsg]);
+    const userMsg: Message = { id: Date.now().toString(), role: 'user', content: trimmed, timestamp: new Date().toISOString() };
+    setMessages(m => [...m, userMsg]);
     setInputText('');
     setIsTyping(true);
-
     const sessionDate = activeSessionDate ?? undefined;
-
     try {
       const { response, transaction } = await chatAgent(trimmed, user.id, [...messages, userMsg], chatContext, sessionDate);
       setIsTyping(false);
-
-      const aiMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: response,
-        timestamp: new Date().toISOString(),
-      };
-      const updatedMessages = [...messages, userMsg, aiMsg];
-      setMessages(updatedMessages);
-      saveSession(user.id, updatedMessages as SessionMessage[], sessionDate);
-
-      if (transaction) {
-        fetchStats();
-        fetchChatContext();
-        trackEvent('transaction_logged', { category: transaction.category, amount: transaction.amount });
-      }
+      const aiMsg: Message = { id: (Date.now() + 1).toString(), role: 'assistant', content: response, timestamp: new Date().toISOString() };
+      const updated = [...messages, userMsg, aiMsg];
+      setMessages(updated);
+      saveSession(user.id, updated as SessionMessage[], sessionDate);
+      if (transaction) { fetchStats(); fetchChatContext(); trackEvent('transaction_logged', { category: transaction.category, amount: transaction.amount }); }
       trackEvent('chat_message_sent');
     } catch (e) {
       captureError(e, { context: 'handleSend', userId: user?.id });
       setIsTyping(false);
       setInputText(trimmed);
-      const errMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: "I'm having trouble connecting. Please try again 🔄",
-      };
-      setMessages((m) => [...m, errMsg]);
-    } finally {
-      isSendingRef.current = false;
-    }
+      setMessages(m => [...m, { id: (Date.now() + 1).toString(), role: 'assistant', content: "I'm having trouble connecting. Please try again 🔄" }]);
+    } finally { isSendingRef.current = false; }
   };
+
+  const handleRegenerate = useCallback(async (assistantMsg: Message) => {
+    if (!user?.id || isSendingRef.current) return;
+    isSendingRef.current = true;
+    const idx = messages.findIndex(m => m.id === assistantMsg.id);
+    const prev = [...messages.slice(0, idx)].reverse().find(m => m.role === 'user');
+    if (!prev) { isSendingRef.current = false; return; }
+    const without = messages.filter(m => m.id !== assistantMsg.id);
+    setMessages(without);
+    setIsTyping(true);
+    try {
+      const { response } = await chatAgent(prev.content, user.id, without, chatContext, activeSessionDate ?? undefined);
+      const newAi: Message = { id: Date.now().toString(), role: 'assistant', content: response, timestamp: new Date().toISOString() };
+      const updated = [...without, newAi];
+      setMessages(updated);
+      saveSession(user.id, updated as SessionMessage[], activeSessionDate ?? undefined);
+    } catch (e) { captureError(e, { context: 'handleRegenerate', userId: user.id }); }
+    finally { setIsTyping(false); isSendingRef.current = false; }
+  }, [messages, user?.id, chatContext, activeSessionDate]);
 
   const handleImagePick = async (useCamera: boolean) => {
     if (!user?.id || isProcessingImage || isSendingRef.current) return;
-
     const used = await checkImageTxLimit(user.id);
-    if (used) {
-      Alert.alert('Daily limit reached', 'You can scan 1 image per day. Come back tomorrow!');
-      return;
-    }
-
+    if (used) { Alert.alert('Daily limit reached', 'You can scan 1 image per day. Come back tomorrow!'); return; }
     if (useCamera) {
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission required', 'Camera access is needed to take photos.');
-        return;
-      }
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) { Alert.alert('Permission required', 'Camera access is needed to take photos.'); return; }
     }
-
     const result = useCamera
       ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.7 })
       : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
-
     if (result.canceled || !result.assets?.[0]) return;
-
     setIsProcessingImage(true);
     isSendingRef.current = true;
-
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: '📷 Scanning image for transactions...',
-      timestamp: new Date().toISOString(),
-    };
-    setMessages((m) => [...m, userMsg]);
+    const userMsg: Message = { id: Date.now().toString(), role: 'user', content: '📷 Scanning image for transactions...', timestamp: new Date().toISOString() };
+    setMessages(m => [...m, userMsg]);
     setIsTyping(true);
-
     try {
-      const compressed = await ImageManipulator.manipulateAsync(
-        result.assets[0].uri,
-        [{ resize: { width: 1024 } }],
-        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+      const comp = await ImageManipulator.manipulateAsync(
+        result.assets[0].uri, [{ resize: { width: 1024 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
       );
-
-      if (!compressed.base64) throw new Error('Failed to process image');
-
-      const parsed = await parseTransactionsFromImage(compressed.base64, 'image/jpeg');
-
+      if (!comp.base64) throw new Error('Failed to process image');
+      const parsed = await parseTransactionsFromImage(comp.base64, 'image/jpeg');
       if (parsed.length === 0) {
-        const aiMsg: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: "I couldn't find any transactions in that image. Try a clearer photo of a receipt or statement.",
-          timestamp: new Date().toISOString(),
-        };
-        const updatedMessages = [...messages, userMsg, aiMsg];
-        setMessages(updatedMessages);
-        saveSession(user.id, updatedMessages as SessionMessage[], activeSessionDate ?? undefined);
+        const aiMsg: Message = { id: (Date.now() + 1).toString(), role: 'assistant', content: "I couldn't find any transactions in that image. Try a clearer photo.", timestamp: new Date().toISOString() };
+        const updated = [...messages, userMsg, aiMsg];
+        setMessages(updated);
+        saveSession(user.id, updated as SessionMessage[], activeSessionDate ?? undefined);
         return;
       }
-
-      // Show confirmation before any DB writes
       setIsTyping(false);
-      const previewLines = parsed
-        .map((t) => `• ${t.description}: ${t.type === 'income' ? '+' : '-'}${currencySymbol}${t.amount.toFixed(2)} (${t.category ?? 'Other'})`)
-        .join('\n');
-
-      const confirmed = await new Promise<boolean>((resolve) => {
-        Alert.alert(
-          `Found ${parsed.length} transaction${parsed.length > 1 ? 's' : ''}`,
-          `${previewLines}\n\nSave all to your account?`,
-          [
-            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-            { text: 'Save All', onPress: () => resolve(true) },
-          ],
-          { cancelable: true, onDismiss: () => resolve(false) }
-        );
+      const lines = parsed.map(tx => `• ${tx.description}: ${tx.type === 'income' ? '+' : '-'}${currencySymbol}${tx.amount.toFixed(2)} (${tx.category ?? 'Other'})`).join('\n');
+      const confirmed = await new Promise<boolean>(resolve => {
+        Alert.alert(`Found ${parsed.length} transaction${parsed.length > 1 ? 's' : ''}`, `${lines}\n\nSave all to your account?`, [
+          { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+          { text: 'Save All', onPress: () => resolve(true) },
+        ], { cancelable: true, onDismiss: () => resolve(false) });
       });
-
-      if (!confirmed) {
-        setMessages(messages);
-        return;
-      }
-
+      if (!confirmed) { setMessages(messages); return; }
       setIsTyping(true);
-      const extraction = await saveImageTransactions(
-        parsed,
-        user.id,
-        chatContext.profile?.currency ?? 'USD',
-        activeSessionDate ?? undefined
-      );
-
-      const aiMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: extraction.summary,
-        timestamp: new Date().toISOString(),
-      };
-
-      const updatedMessages = [...messages, userMsg, aiMsg];
-      setMessages(updatedMessages);
-      saveSession(user.id, updatedMessages as SessionMessage[], activeSessionDate ?? undefined);
-
-      if (extraction.savedCount > 0) {
-        await markImageTxUsed(user.id);
-        fetchStats();
-        fetchChatContext();
-        trackEvent('image_transactions_logged', { count: extraction.savedCount });
-      }
+      const extraction = await saveImageTransactions(parsed, user.id, chatContext.profile?.currency ?? 'USD', activeSessionDate ?? undefined);
+      const aiMsg: Message = { id: (Date.now() + 1).toString(), role: 'assistant', content: extraction.summary, timestamp: new Date().toISOString() };
+      const updated = [...messages, userMsg, aiMsg];
+      setMessages(updated);
+      saveSession(user.id, updated as SessionMessage[], activeSessionDate ?? undefined);
+      if (extraction.savedCount > 0) { await markImageTxUsed(user.id); fetchStats(); fetchChatContext(); trackEvent('image_transactions_logged', { count: extraction.savedCount }); }
     } catch (e) {
       captureError(e, { context: 'handleImagePick', userId: user.id });
-      const errMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: "I couldn't process that image. Please try again with a clearer photo. 🔄",
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((m) => [...m, errMsg]);
-    } finally {
-      setIsTyping(false);
-      setIsProcessingImage(false);
-      isSendingRef.current = false;
-    }
+      setMessages(m => [...m, { id: (Date.now() + 1).toString(), role: 'assistant', content: "I couldn't process that image. Please try again 🔄" }]);
+    } finally { setIsTyping(false); setIsProcessingImage(false); isSendingRef.current = false; }
   };
 
   const handleReportMessage = (msg: Message) => {
-    Alert.alert(
-      'Report AI Response',
-      'Flag this response as inappropriate, inaccurate, or offensive. This helps us improve Finni.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Report',
-          style: 'destructive',
-          onPress: () => {
-            const subject = encodeURIComponent('Finni AI Response Report');
-            const body = encodeURIComponent(
-              `I'd like to report the following AI-generated response:\n\n"${msg.content}"\n\nReason: [Please describe the issue]\n\nTimestamp: ${msg.timestamp ?? 'N/A'}`
-            );
-            Linking.openURL(`mailto:support@heyfinni.com?subject=${subject}&body=${body}`);
-            Alert.alert('Thank you', 'Your report helps us improve Finni.');
-          },
-        },
-      ]
-    );
+    Alert.alert('Report AI Response', 'Flag this response as inappropriate, inaccurate, or offensive.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Report', style: 'destructive', onPress: () => {
+        const sub  = encodeURIComponent('Finni AI Response Report');
+        const body = encodeURIComponent(`I'd like to report:\n\n"${msg.content}"\n\nReason: [Please describe]\n\nTimestamp: ${msg.timestamp ?? 'N/A'}`);
+        Linking.openURL(`mailto:support@heyfinni.com?subject=${sub}&body=${body}`);
+        Alert.alert('Thank you', 'Your report helps us improve Finni.');
+      }},
+    ]);
   };
 
   const showImageOptions = () => {
     if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { options: ['Cancel', 'Take Photo', 'Choose from Library'], cancelButtonIndex: 0 },
-        (i) => { if (i === 1) handleImagePick(true); else if (i === 2) handleImagePick(false); }
-      );
+      ActionSheetIOS.showActionSheetWithOptions({ options: ['Cancel', 'Take Photo', 'Choose from Library'], cancelButtonIndex: 0 }, i => {
+        if (i === 1) handleImagePick(true);
+        else if (i === 2) handleImagePick(false);
+      });
     } else {
       Alert.alert('Scan Transactions', 'Choose an option', [
         { text: 'Take Photo', onPress: () => handleImagePick(true) },
@@ -455,15 +443,11 @@ export default function HomeScreen() {
     }
   };
 
-  const handleChipPress = (chip: string) => {
-    const text = chip.replace(/^[^\s]+\s/, '').trim();
-    handleSend(text);
-  };
+  const handleChipPress = (chip: string) => handleSend(chip.replace(/^[^\s]+\s/, '').trim());
 
   const openHistory = async () => {
     if (!user?.id) return;
-    const sessions = await loadAllSessions(user.id);
-    setHistorySessions(sessions);
+    setHistorySessions(await loadAllSessions(user.id));
     setShowHistory(true);
   };
 
@@ -479,523 +463,364 @@ export default function HomeScreen() {
     welcomeAddedRef.current = true;
     if (!user?.id) return;
     const saved = await loadTodaySession(user.id);
-    if (saved && saved.length > 0) {
-      setMessages(saved as Message[]);
-    } else {
-      const name = firstName ?? 'there';
-      setMessages([{
-        id: 'welcome',
-        role: 'assistant',
-        content: `Hi ${name}! 👋 I'm Finni. Ask me anything about your finances or just say 'spent $X on Y' to log expenses`,
-      }]);
-    }
+    setMessages(saved?.length ? (saved as Message[]) : [{ id: 'welcome', role: 'assistant', content: `Hi ${firstName ?? 'there'}! 👋 I'm Finni. Ask me anything or say 'spent $X on Y' to log expenses` }]);
   };
 
   const isConversationEmpty = messages.length <= 1;
+  const busy = isTyping || isProcessingImage;
 
-  return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+  // ── Composer pieces ────────────────────────────────────────────────────────
+  const composerInner = (
+    <>
+      <TouchableOpacity style={styles.composerBtn} onPress={showImageOptions} disabled={busy} activeOpacity={0.7}>
+        <CameraIcon color={busy ? t.text3 : t.text2} />
+      </TouchableOpacity>
+      <TextInput
+        style={[styles.composerInput, { fontFamily: fonts.regular }]}
+        placeholder="Message Finni…"
+        placeholderTextColor={t.text3}
+        value={inputText}
+        onChangeText={setInputText}
+        onSubmitEditing={() => handleSend(inputText)}
+        multiline
+        maxLength={500}
+        editable={!busy}
+      />
+      <TouchableOpacity style={styles.composerBtn} onPress={startRecording} disabled={busy} activeOpacity={0.7}>
+        <MicIcon color={busy ? t.text3 : t.text2} />
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.sendBtn, (!inputText.trim() || busy) ? styles.sendBtnOff : styles.sendBtnOn]}
+        onPress={() => handleSend(inputText)}
+        disabled={!inputText.trim() || busy}
+        activeOpacity={0.8}
       >
-        {/* TOP SECTION - fixed, not scrollable */}
-        <View style={styles.topSection}>
-          <View style={styles.header}>
-            <Text style={styles.greeting}>{greeting}</Text>
-            <View style={styles.headerIcons}>
-              <Pressable style={styles.headerIconButton} hitSlop={12} onPress={openHistory}>
-                <Text style={styles.headerIcon}>🕐</Text>
-              </Pressable>
-              <Pressable
-                style={styles.headerIconButton}
-                hitSlop={12}
-                onPress={() => navigation.navigate('Settings' as never)}
-              >
-                <Text style={styles.headerIcon}>⚙️</Text>
-              </Pressable>
-            </View>
-          </View>
-          <Text style={styles.date}>{formatDate(today)}</Text>
+        <SendIcon active={!!(inputText.trim() && !busy)} />
+      </TouchableOpacity>
+    </>
+  );
 
-          <View style={styles.statsRow}>
-            <View style={styles.statCard}>
-              <Text style={styles.statLabel}>Today</Text>
-              <Text style={styles.statValue}>{currencySymbol}{todaySpent.toFixed(2)}</Text>
+  // ── Render ────────────────────────────────────────────────────────────────
+  return (
+    <View style={styles.outer}>
+      <Aurora width={width} height={height} />
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <KeyboardAvoidingView
+          style={styles.kav}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        >
+          {/* ── TOP SECTION ── */}
+          <View style={styles.topSection}>
+            {/* Header row */}
+            <View style={styles.headerRow}>
+              <View>
+                <Text style={[styles.greetingText, { fontFamily: fonts.bold }]}>{greeting}</Text>
+                <Text style={[styles.dateText, { fontFamily: fonts.regular }]}>{formatDate(today)}</Text>
+              </View>
+              <Pressable style={styles.historyBtn} onPress={openHistory} hitSlop={12}>
+                <ClockIcon />
+              </Pressable>
             </View>
-            <View style={styles.statCard}>
-              <Text style={styles.statLabel}>Month</Text>
-              <Text style={styles.statValue}>{monthUsedPct}% used</Text>
+
+            {/* ArcMeter hero */}
+            <View style={styles.arcSection}>
+              <ArcMeter size={200} pct={monthUsedPct} markerPct={monthElapsedPct}>
+                <Orb size={84} rings talking={isTyping} />
+                <Text style={[styles.arcPct, { fontFamily: fonts.extraBold }]}>{monthUsedPct}%</Text>
+                <Text style={[styles.arcSub, { fontFamily: fonts.medium }]}>of budget</Text>
+              </ArcMeter>
+
+              {/* Pace pill */}
+              <View style={[styles.pacePill, onTrack ? styles.pacePillGreen : styles.pacePillRed]}>
+                <View style={[styles.paceDot, { backgroundColor: onTrack ? t.green : t.red }]} />
+                <Text style={[styles.paceText, { fontFamily: fonts.semiBold, color: onTrack ? t.green : t.red }]}>
+                  {onTrack ? 'On track' : 'Over pace'}
+                </Text>
+              </View>
+
+              {/* Budget left */}
+              <Text style={[styles.budgetLeft, { fontFamily: fonts.medium }]}>
+                {currencySymbol}{budgetLeft.toFixed(0)} left this month
+              </Text>
             </View>
-            <View style={styles.statCard}>
-              <Text style={styles.statLabel}>Left</Text>
-              <Text style={styles.statValue}>{currencySymbol}{budgetLeft.toFixed(2)}</Text>
-            </View>
+
+            {/* Finni noticed card */}
+            {finnisNoticed ? (
+              <TouchableOpacity
+                style={styles.noticedWrap}
+                onPress={() => navigation.navigate('Analytics' as never)}
+                activeOpacity={0.85}
+              >
+                <GlassCard style={styles.noticedCard} borderRadius={t.rLg} intensity={22}>
+                  <View style={styles.noticedTop}>
+                    <Text style={[styles.noticedBadge, { fontFamily: fonts.semiBold }]}>✦ Finni noticed</Text>
+                    <Text style={styles.noticedArrow}>→</Text>
+                  </View>
+                  <Text style={[styles.noticedText, { fontFamily: fonts.regular }]}>{finnisNoticed}</Text>
+                </GlassCard>
+              </TouchableOpacity>
+            ) : null}
+
+            {/* Session banner */}
+            {activeSessionDate ? (
+              <View style={styles.sessionBanner}>
+                <Text style={[styles.sessionBannerTxt, { fontFamily: fonts.semiBold }]}>
+                  📅 {formatSessionDate(activeSessionDate)}
+                </Text>
+                <TouchableOpacity onPress={returnToToday} hitSlop={8}>
+                  <Text style={[styles.sessionBannerBack, { fontFamily: fonts.medium }]}>Back to Today →</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.divider} />
-          {activeSessionDate && (
-            <View style={styles.sessionBanner}>
-              <Text style={styles.sessionBannerText}>📅 {formatSessionDate(activeSessionDate)}</Text>
-              <TouchableOpacity onPress={returnToToday} hitSlop={8}>
-                <Text style={styles.sessionBannerBack}>Back to Today →</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
 
-        {/* CHAT SECTION - flex 1, scrollable */}
-        <ScrollView
-          ref={scrollRef}
-          style={styles.chatScroll}
-          contentContainerStyle={styles.chatContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          {messages.map((msg) =>
-            msg.role === 'assistant' ? (
-              <View key={msg.id} style={styles.assistantRow}>
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>F</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={styles.assistantBubble}>
-                    <Text style={styles.bubbleText}>{msg.content}</Text>
-                  </View>
-                  <View style={styles.assistantMeta}>
-                    {msg.timestamp && (
-                      <Text style={styles.messageTime}>{formatMessageTime(msg.timestamp)}</Text>
-                    )}
-                    {msg.id !== 'welcome' && (
-                      <TouchableOpacity onPress={() => handleReportMessage(msg)} hitSlop={8}>
-                        <Text style={styles.reportText}>Report</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                </View>
-              </View>
-            ) : (
-              <View key={msg.id} style={styles.userRow}>
-                <View style={{ alignItems: 'flex-end' }}>
-                  <View style={styles.userBubble}>
-                    <Text style={styles.bubbleText}>{msg.content}</Text>
-                  </View>
-                  {msg.timestamp && (
-                    <Text style={[styles.messageTime, { textAlign: 'right' }]}>{formatMessageTime(msg.timestamp)}</Text>
-                  )}
-                </View>
-              </View>
-            )
-          )}
-          {isTyping && (
-            <View style={styles.assistantRow}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>F</Text>
-              </View>
-              <View style={styles.typingBubble}>
-                <Text style={styles.typingText}>{typingDots}</Text>
-              </View>
-            </View>
-          )}
-        </ScrollView>
-
-        {/* Suggestion chips - only when chat is empty */}
-        {isConversationEmpty && (
+          {/* ── CHAT SCROLL ── */}
           <ScrollView
-            horizontal
-            style={styles.chipsScroll}
-            contentContainerStyle={styles.chipsContent}
-            showsHorizontalScrollIndicator={false}
+            ref={scrollRef}
+            style={styles.chatScroll}
+            contentContainerStyle={styles.chatContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
           >
-            {QUICK_CHIPS.map((chip) => (
-              <TouchableOpacity
-                key={chip}
-                style={styles.chip}
-                onPress={() => handleChipPress(chip)}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.chipText}>{chip}</Text>
-              </TouchableOpacity>
-            ))}
+            {/* Inline chips — empty state */}
+            {isConversationEmpty && (
+              <View style={styles.chipsSection}>
+                <Text style={[styles.tryAskLabel, { fontFamily: fonts.semiBold }]}>Try asking</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+                  {QUICK_CHIPS.map(chip => (
+                    <TouchableOpacity key={chip} style={styles.chip} onPress={() => handleChipPress(chip)} activeOpacity={0.8}>
+                      <Text style={[styles.chipText, { fontFamily: fonts.medium }]}>{chip}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
+            {/* Messages */}
+            {messages.map(msg =>
+              msg.role === 'assistant' ? (
+                <View key={msg.id} style={styles.assistantRow}>
+                  <View style={styles.orbAvatar}>
+                    <Orb size={28} rings={false} />
+                  </View>
+                  <View style={styles.asMsgCol}>
+                    <GlassCard style={styles.asBubble} borderRadius={t.rMd} intensity={22}>
+                      <Text style={[styles.bubbleText, { fontFamily: fonts.regular }]}>{msg.content}</Text>
+                    </GlassCard>
+                    {msg.id !== 'welcome' && (
+                      <AIActionRow
+                        msg={msg}
+                        onRegenerate={() => handleRegenerate(msg)}
+                        onReport={() => handleReportMessage(msg)}
+                      />
+                    )}
+                    {msg.timestamp ? (
+                      <Text style={[styles.msgTime, { fontFamily: fonts.regular }]}>{formatMessageTime(msg.timestamp)}</Text>
+                    ) : null}
+                  </View>
+                </View>
+              ) : (
+                <View key={msg.id} style={styles.userRow}>
+                  <LinearGradient
+                    colors={['#4f46e5', '#6366f1']}
+                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                    style={styles.userBubble}
+                  >
+                    <Text style={[styles.bubbleText, { fontFamily: fonts.regular }]}>{msg.content}</Text>
+                  </LinearGradient>
+                  {msg.timestamp ? (
+                    <Text style={[styles.msgTimeRight, { fontFamily: fonts.regular }]}>{formatMessageTime(msg.timestamp)}</Text>
+                  ) : null}
+                </View>
+              )
+            )}
+
+            {/* Typing indicator */}
+            {isTyping && (
+              <View style={styles.assistantRow}>
+                <View style={styles.orbAvatar}><Orb size={28} rings={false} /></View>
+                <GlassCard style={styles.typingBubble} borderRadius={t.rMd} intensity={22}>
+                  <Text style={[styles.typingText, { fontFamily: fonts.bold }]}>{typingDots}</Text>
+                </GlassCard>
+              </View>
+            )}
           </ScrollView>
-        )}
 
-        {/* BOTTOM INPUT BAR - fixed */}
-        <View style={styles.inputBar}>
-          <TouchableOpacity
-            style={[styles.cameraButton, (isTyping || isProcessingImage) && styles.sendDisabled]}
-            onPress={showImageOptions}
-            disabled={isTyping || isProcessingImage}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.cameraIcon}>📷</Text>
-          </TouchableOpacity>
-          <TextInput
-            style={styles.input}
-            placeholder="Message Finni..."
-            placeholderTextColor={colors.textSecondary}
-            value={inputText}
-            onChangeText={setInputText}
-            onSubmitEditing={() => handleSend(inputText)}
-            multiline
-            maxLength={500}
-            editable={!isTyping && !isProcessingImage}
-          />
-          <TouchableOpacity
-            style={[styles.sendButton, !inputText.trim() && styles.sendDisabled]}
-            onPress={() => handleSend(inputText)}
-            disabled={!inputText.trim() || isProcessingImage}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.sendIcon}>➤</Text>
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
+          {/* ── COMPOSER ── */}
+          {isRecording ? (
+            <View style={[styles.composerAndroid, styles.voiceBar]}>
+              <TouchableOpacity style={styles.voiceCancelBtn} onPress={stopRecording} hitSlop={12}>
+                <Text style={[styles.voiceCancelTxt, { fontFamily: fonts.semiBold }]}>✕</Text>
+              </TouchableOpacity>
+              <View style={styles.waveRow}>
+                {waveAnims.map((anim, i) => (
+                  <Animated.View key={i} style={[styles.waveBar, { transform: [{ scaleY: anim }] }]} />
+                ))}
+              </View>
+              <Text style={[styles.voiceTimer, { fontFamily: fonts.medium }]}>{fmtRecTime(recordingSeconds)}</Text>
+              <TouchableOpacity style={styles.voiceSendBtn} onPress={stopRecording} activeOpacity={0.8}>
+                <Text style={[styles.voiceSendTxt, { fontFamily: fonts.bold }]}>Send</Text>
+              </TouchableOpacity>
+            </View>
+          ) : Platform.OS === 'ios' ? (
+            <BlurView intensity={22} tint="dark" style={styles.composerBlur}>
+              {composerInner}
+            </BlurView>
+          ) : (
+            <View style={styles.composerAndroid}>
+              {composerInner}
+            </View>
+          )}
+        </KeyboardAvoidingView>
+      </SafeAreaView>
 
-      {/* Chat History Modal */}
+      {/* History Modal */}
       <Modal visible={showHistory} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowHistory(false)}>
         <SafeAreaView style={styles.historyModal} edges={['top', 'bottom']}>
           <View style={styles.historyHeader}>
-            <Text style={styles.historyTitle}>Chat History</Text>
+            <Text style={[styles.historyTitle, { fontFamily: fonts.bold }]}>Chat History</Text>
             <TouchableOpacity onPress={() => setShowHistory(false)} hitSlop={12}>
               <Text style={styles.historyClose}>✕</Text>
             </TouchableOpacity>
           </View>
-          <Text style={styles.historySubtitle}>You can review and continue your last 20 days of conversations.</Text>
+          <Text style={[styles.historySub, { fontFamily: fonts.regular }]}>Review and continue your last 20 days.</Text>
           <ScrollView style={styles.historyScroll} contentContainerStyle={styles.historyContent} showsVerticalScrollIndicator={false}>
             {historySessions.length === 0 ? (
-              <Text style={styles.historyEmpty}>No past sessions yet. Start chatting and your threads will appear here.</Text>
-            ) : (
-              historySessions.map((session) => (
-                <TouchableOpacity
-                  key={session.id}
-                  style={[styles.historyItem, session.date === (activeSessionDate ?? todayDateStr()) && styles.historyItemActive]}
-                  onPress={() => loadHistorySession(session)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.historyItemDate}>{formatSessionDate(session.date)}</Text>
-                  <Text style={styles.historyItemPreview} numberOfLines={1}>{session.preview}</Text>
-                  <Text style={styles.historyItemMeta}>{session.messages.length} messages · tap to open</Text>
-                </TouchableOpacity>
-              ))
-            )}
+              <Text style={[styles.historyEmpty, { fontFamily: fonts.regular }]}>No past sessions yet. Start chatting and your threads will appear here.</Text>
+            ) : historySessions.map(session => (
+              <TouchableOpacity
+                key={session.id}
+                style={[styles.historyItem, session.date === (activeSessionDate ?? todayDateStr()) && styles.historyItemActive]}
+                onPress={() => loadHistorySession(session)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.historyItemDate, { fontFamily: fonts.semiBold }]}>{formatSessionDate(session.date)}</Text>
+                <Text style={[styles.historyItemPreview, { fontFamily: fonts.regular }]} numberOfLines={1}>{session.preview}</Text>
+                <Text style={[styles.historyItemMeta, { fontFamily: fonts.regular }]}>{session.messages.length} messages · tap to open</Text>
+              </TouchableOpacity>
+            ))}
           </ScrollView>
         </SafeAreaView>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 
+// ── Styles ─────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  container: {
-    flex: 1,
-    flexDirection: 'column',
-  },
-  topSection: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 12,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  greeting: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  headerIconButton: {
-    padding: 4,
-  },
-  headerIcon: {
-    fontSize: 24,
-  },
-  date: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginBottom: 16,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 12,
-  },
-  statCard: {
-    flex: 1,
-    height: 70,
-    backgroundColor: colors.cardBackground,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 12,
-    justifyContent: 'center',
-  },
-  statLabel: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    marginBottom: 4,
-  },
-  statValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: colors.border,
-  },
-  chatScroll: {
-    flex: 1,
-  },
-  chatContent: {
-    padding: 16,
-    paddingBottom: 24,
-  },
-  assistantRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    marginBottom: 12,
-    maxWidth: '85%',
-    alignSelf: 'flex-start',
-  },
-  avatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  avatarText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  assistantBubble: {
-    backgroundColor: colors.cardBackground,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 12,
-    maxWidth: '85%',
-  },
-  typingBubble: {
-    backgroundColor: colors.cardBackground,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 12,
-    minWidth: 48,
-  },
-  typingText: {
-    fontSize: 16,
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  userRow: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    marginBottom: 12,
-  },
-  userBubble: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    padding: 12,
-    maxWidth: '85%',
-  },
-  bubbleText: {
-    fontSize: 16,
-    color: colors.textPrimary,
-  },
-  chipsScroll: {
-    flexShrink: 0,
-    marginBottom: 8,
-  },
-  chipsContent: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    gap: 8,
-    alignItems: 'center',
-  },
-  chip: {
-    flexShrink: 0,
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: colors.primary,
-    borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  chipText: {
-    fontSize: 14,
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  inputBar: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    backgroundColor: colors.cardBackground,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    padding: 12,
+  outer: { flex: 1, backgroundColor: t.auraBg },
+  safeArea: { flex: 1, backgroundColor: 'transparent' },
+  kav: { flex: 1 },
+
+  // Top section
+  topSection: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 10 },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
+  greetingText: { fontSize: 22, color: t.text, letterSpacing: -0.3 },
+  dateText: { fontSize: 13, color: t.text3, marginTop: 2 },
+  historyBtn: { padding: 6 },
+
+  arcSection: { alignItems: 'center', gap: 12, marginBottom: 12 },
+  arcPct: { fontSize: 26, color: t.text, letterSpacing: -0.5 },
+  arcSub: { fontSize: 12, color: t.text3, marginTop: -2 },
+
+  pacePill: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 14, paddingVertical: 7, borderRadius: t.rPill, borderWidth: 1 },
+  pacePillGreen: { backgroundColor: t.greenTint, borderColor: 'rgba(52,211,153,0.3)' },
+  pacePillRed: { backgroundColor: t.redTint, borderColor: 'rgba(251,113,133,0.3)' },
+  paceDot: { width: 7, height: 7, borderRadius: 4 },
+  paceText: { fontSize: 13 },
+  budgetLeft: { fontSize: 13, color: t.text3 },
+
+  noticedWrap: { marginTop: 8 },
+  noticedCard: { padding: 14 },
+  noticedTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 },
+  noticedBadge: { fontSize: 12, color: t.auraAqua },
+  noticedArrow: { fontSize: 14, color: t.text3 },
+  noticedText: { fontSize: 14, color: t.text2, lineHeight: 20 },
+
+  sessionBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: t.indigoTint, borderRadius: t.rSm, paddingHorizontal: 12, paddingVertical: 8, marginTop: 8 },
+  sessionBannerTxt: { fontSize: 13, color: t.indigoBright },
+  sessionBannerBack: { fontSize: 12, color: t.text2 },
+
+  divider: { height: 1, backgroundColor: t.line, marginHorizontal: 0 },
+
+  // Chat
+  chatScroll: { flex: 1 },
+  chatContent: { padding: 16, paddingBottom: 24 },
+
+  chipsSection: { marginBottom: 20, gap: 10 },
+  tryAskLabel: { fontSize: 12, color: t.text3, letterSpacing: 0.3, textTransform: 'uppercase' },
+  chipsRow: { flexDirection: 'row', gap: 8 },
+  chip: { backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: t.glassLine2, borderRadius: t.rPill, paddingHorizontal: 14, paddingVertical: 9 },
+  chipText: { fontSize: 13, color: t.text2 },
+
+  // Messages
+  assistantRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16, maxWidth: '90%' },
+  orbAvatar: { width: 28, height: 28, marginRight: 10, marginTop: 2 },
+  asMsgCol: { flex: 1 },
+  asBubble: { padding: 13 },
+  typingBubble: { padding: 13, minWidth: 56 },
+  typingText: { fontSize: 16, color: t.auraAqua },
+
+  userRow: { flexDirection: 'column', alignItems: 'flex-end', marginBottom: 16, alignSelf: 'flex-end', maxWidth: '82%' },
+  userBubble: { borderRadius: t.rMd, padding: 13 },
+
+  bubbleText: { fontSize: 15, color: t.text, lineHeight: 22 },
+  msgTime: { fontSize: 10, color: t.text3, marginTop: 4, marginLeft: 2 },
+  msgTimeRight: { fontSize: 10, color: t.text3, marginTop: 4 },
+
+  // Composer — glass pill
+  composerBlur: {
+    flexDirection: 'row', alignItems: 'flex-end',
+    paddingHorizontal: 12, paddingVertical: 10, paddingBottom: 14,
+    borderTopWidth: 1, borderTopColor: t.line,
     gap: 8,
   },
-  input: {
-    flex: 1,
-    backgroundColor: colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: colors.textPrimary,
-    maxHeight: 100,
-  },
-  sendButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  sendDisabled: {
-    opacity: 0.4,
-  },
-  sendIcon: {
-    fontSize: 18,
-    color: colors.textPrimary,
-    fontWeight: '700',
-  },
-  cameraButton: {
-    width: 40,
-    height: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 4,
-  },
-  cameraIcon: {
-    fontSize: 22,
-  },
-  headerIcons: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  composerAndroid: {
+    flexDirection: 'row', alignItems: 'flex-end',
+    backgroundColor: 'rgba(10,15,30,0.92)',
+    paddingHorizontal: 12, paddingVertical: 10, paddingBottom: 14,
+    borderTopWidth: 1, borderTopColor: t.line,
     gap: 8,
   },
-  historyModal: {
-    flex: 1,
-    backgroundColor: colors.background,
+  composerBtn: { width: 36, height: 44, alignItems: 'center', justifyContent: 'center' },
+  composerInput: {
+    flex: 1, backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1, borderColor: t.glassLine, borderRadius: t.rMd,
+    paddingHorizontal: 14, paddingVertical: 10,
+    fontSize: 15, color: t.text, maxHeight: 100,
   },
-  historyHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+  sendBtn: { width: 40, height: 40, borderRadius: t.rMd, alignItems: 'center', justifyContent: 'center' },
+  sendBtnOn: { backgroundColor: t.auraAqua },
+  sendBtnOff: { backgroundColor: 'rgba(255,255,255,0.06)' },
+
+  // Voice recording bar
+  voiceBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 16, paddingVertical: 12, paddingBottom: 16,
   },
-  historyTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  historyClose: {
-    fontSize: 20,
-    color: colors.textSecondary,
-    fontWeight: '600',
-  },
-  historyScroll: {
-    flex: 1,
-  },
-  historyContent: {
-    padding: 16,
-    gap: 10,
-  },
-  historySubtitle: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-    lineHeight: 18,
-  },
-  historyEmpty: {
-    textAlign: 'center',
-    color: colors.textSecondary,
-    fontSize: 14,
-    marginTop: 40,
-    lineHeight: 22,
-    paddingHorizontal: 16,
-  },
-  historyItem: {
-    backgroundColor: colors.cardBackground,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 16,
-  },
-  historyItemActive: {
-    borderColor: colors.primary,
-    backgroundColor: 'rgba(99, 102, 241, 0.08)',
-  },
-  historyItemDate: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.primary,
-    marginBottom: 4,
-  },
-  historyItemPreview: {
-    fontSize: 14,
-    color: colors.textPrimary,
-    marginBottom: 4,
-  },
-  historyItemMeta: {
-    fontSize: 11,
-    color: colors.textSecondary,
-  },
-  sessionBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(99, 102, 241, 0.12)',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginTop: 8,
-  },
-  sessionBannerText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  sessionBannerBack: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textSecondary,
-  },
-  assistantMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 3,
-    marginLeft: 4,
-    gap: 8,
-  },
-  reportText: {
-    fontSize: 10,
-    color: colors.textSecondary,
-    opacity: 0.7,
-  },
-  messageTime: {
-    fontSize: 10,
-    color: colors.textSecondary,
-  },
+  voiceCancelBtn: { padding: 6 },
+  voiceCancelTxt: { fontSize: 16, color: t.text2 },
+  waveRow: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, height: 32 },
+  waveBar: { width: 4, height: 28, borderRadius: 2, backgroundColor: t.auraAqua },
+  voiceTimer: { fontSize: 13, color: t.text2, minWidth: 40, textAlign: 'center' },
+  voiceSendBtn: { backgroundColor: t.auraAqua, borderRadius: t.rSm, paddingHorizontal: 16, paddingVertical: 8 },
+  voiceSendTxt: { fontSize: 14, color: t.auraBg },
+
+  // History modal
+  historyModal: { flex: 1, backgroundColor: '#070A13' },
+  historyHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: t.line },
+  historyTitle: { fontSize: 20, color: t.text },
+  historyClose: { fontSize: 20, color: t.text2 },
+  historySub: { fontSize: 13, color: t.text2, paddingHorizontal: 20, paddingBottom: 12, lineHeight: 18 },
+  historyScroll: { flex: 1 },
+  historyContent: { padding: 16, gap: 10 },
+  historyEmpty: { textAlign: 'center', color: t.text2, fontSize: 14, marginTop: 40, lineHeight: 22, paddingHorizontal: 16 },
+  historyItem: { backgroundColor: 'rgba(255,255,255,0.055)', borderWidth: 1, borderColor: t.glassLine, borderRadius: t.rMd, padding: 16, gap: 4 },
+  historyItemActive: { borderColor: t.auraIndigo, backgroundColor: t.indigoTint },
+  historyItemDate: { fontSize: 13, color: t.indigoBright },
+  historyItemPreview: { fontSize: 14, color: t.text },
+  historyItemMeta: { fontSize: 11, color: t.text3 },
 });

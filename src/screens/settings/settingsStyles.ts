@@ -14,13 +14,10 @@ export const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  backButton: {
-    padding: 4,
-  },
-  backButtonText: {
+  headerTitle: {
     fontSize: 18,
-    color: '#6366F1',
-    fontWeight: '600',
+    fontWeight: '700',
+    color: colors.textPrimary,
   },
   scrollView: {
     flex: 1,

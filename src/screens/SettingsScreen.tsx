@@ -7,7 +7,6 @@ const PRIVACY_URL = 'https://www.heyfinni.com/privacy-policy';
 const DATA_DELETION_URL = 'https://www.heyfinni.com/data-deletion';
 const SUPPORT_EMAIL = 'support@heyfinni.com';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfile } from '../contexts/ProfileContext';
 import { colors } from '../lib/theme';
@@ -25,7 +24,6 @@ function getInitial(name: string | null | undefined): string {
 }
 
 export default function SettingsScreen() {
-  const navigation = useNavigation();
   const { user, signOut } = useAuth();
   const { profile, refreshProfile } = useProfile();
   const [categoriesModalVisible, setCategoriesModalVisible] = useState(false);
@@ -138,9 +136,7 @@ export default function SettingsScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={12} style={styles.backButton}>
-          <Text style={styles.backButtonText}>‹</Text>
-        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Settings</Text>
       </View>
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.profileCard}>

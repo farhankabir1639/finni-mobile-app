@@ -10,10 +10,16 @@ import {
   Platform,
   ScrollView,
   Linking,
-  Image,
+  useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../contexts/AuthContext';
-import { colors } from '../../lib/theme';
+import { signInWithGoogle } from '../../lib/googleAuth';
+import Aurora from '../../components/Aurora';
+import Orb from '../../components/Orb';
+import { t, fonts, gradients } from '../../theme/tokens';
+import Svg, { Path, Line } from 'react-native-svg';
 
 const PRIVACY_URL = 'https://www.heyfinni.com/privacy-policy';
 const DATA_DELETION_URL = 'https://www.heyfinni.com/data-deletion';
@@ -22,24 +28,58 @@ type LoginScreenProps = {
   navigation: { navigate: (name: string) => void };
 };
 
+function GoogleIcon() {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24">
+      <Path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+      <Path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+      <Path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+      <Path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+    </Svg>
+  );
+}
+
+function Divider() {
+  return (
+    <View style={styles.divider}>
+      <View style={styles.dividerLine} />
+      <Text style={[styles.dividerText, { fontFamily: fonts.medium }]}>or</Text>
+      <View style={styles.dividerLine} />
+    </View>
+  );
+}
+
 export default function LoginScreen({ navigation }: LoginScreenProps) {
+  const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const { signIn } = useAuth();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [emailFocused, setEmailFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
 
-  const { signIn } = useAuth();
-
   const handleSignIn = async () => {
     setError(null);
     setLoading(true);
-    const { error: signInError } = await signIn(email.trim(), password);
+    const { error: err } = await signIn(email.trim(), password);
     setLoading(false);
-    if (signInError) {
-      setError(signInError.message);
-      return;
+    if (err) setError(err.message);
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError(null);
+    setGoogleLoading(true);
+    try {
+      const { error: err } = await signInWithGoogle();
+      if (err) setError(err.message);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong');
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -48,27 +88,58 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
+      <Aurora width={width} height={height} />
+
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scroll,
+          { paddingTop: insets.top + 32, paddingBottom: insets.bottom + 32 },
+        ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.logoContainer}>
-          <Image
-            source={require('../../../assets/logo-white.png')}
-            style={styles.logoImage}
-            resizeMode="contain"
-          />
+        {/* hero */}
+        <View style={styles.hero}>
+          <Orb size={108} rings talking />
+          <Text style={[styles.title, { fontFamily: fonts.extraBold }]}>
+            Welcome to Finni
+          </Text>
+          <Text style={[styles.subtitle, { fontFamily: fonts.regular }]}>
+            Your calm AI finance coach
+          </Text>
         </View>
 
-        <Text style={styles.title}>Welcome to Finni</Text>
-        <Text style={styles.subtitle}>Your AI Finance Coach</Text>
-
+        {/* form */}
         <View style={styles.form}>
+          {/* Google button */}
+          <TouchableOpacity
+            style={styles.googleBtn}
+            onPress={handleGoogleSignIn}
+            disabled={googleLoading}
+            activeOpacity={0.8}
+          >
+            {googleLoading ? (
+              <ActivityIndicator size="small" color={t.text} />
+            ) : (
+              <>
+                <GoogleIcon />
+                <Text style={[styles.googleBtnText, { fontFamily: fonts.semiBold }]}>
+                  Continue with Google
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          <Divider />
+
           <TextInput
-            style={[styles.input, emailFocused && styles.inputFocused]}
+            style={[
+              styles.input,
+              emailFocused && styles.inputFocused,
+              { fontFamily: fonts.regular },
+            ]}
             placeholder="Email"
-            placeholderTextColor={colors.textSecondary}
+            placeholderTextColor={t.text3}
             value={email}
             onChangeText={setEmail}
             onFocus={() => setEmailFocused(true)}
@@ -78,9 +149,13 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
             autoComplete="email"
           />
           <TextInput
-            style={[styles.input, passwordFocused && styles.inputFocused]}
+            style={[
+              styles.input,
+              passwordFocused && styles.inputFocused,
+              { fontFamily: fonts.regular },
+            ]}
             placeholder="Password"
-            placeholderTextColor={colors.textSecondary}
+            placeholderTextColor={t.text3}
             value={password}
             onChangeText={setPassword}
             onFocus={() => setPasswordFocused(true)}
@@ -89,39 +164,52 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
             autoComplete="password"
           />
 
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          {error ? (
+            <Text style={[styles.errorText, { fontFamily: fonts.medium }]}>{error}</Text>
+          ) : null}
 
+          {/* CTA — aqua → lavender gradient */}
           <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleSignIn}
             disabled={loading}
+            activeOpacity={0.85}
           >
-            {loading ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={styles.buttonText}>Sign In</Text>
-            )}
+            <LinearGradient
+              colors={gradients.cta}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={[styles.ctaBtn, loading && styles.ctaBtnDisabled]}
+            >
+              {loading ? (
+                <ActivityIndicator color="#0b0a1a" />
+              ) : (
+                <Text style={[styles.ctaBtnText, { fontFamily: fonts.bold }]}>
+                  Sign In
+                </Text>
+              )}
+            </LinearGradient>
           </TouchableOpacity>
 
-          <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 16 }}>
-            <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
+          <View style={styles.switchRow}>
+            <Text style={[styles.switchText, { fontFamily: fonts.regular }]}>
               Don't have an account?{' '}
             </Text>
             <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
-              <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '500' }}>
+              <Text style={[styles.switchLink, { fontFamily: fonts.semiBold }]}>
                 Sign Up
               </Text>
             </TouchableOpacity>
           </View>
         </View>
 
+        {/* legal */}
         <View style={styles.legalRow}>
           <TouchableOpacity onPress={() => Linking.openURL(PRIVACY_URL)}>
-            <Text style={styles.legalLink}>Privacy Policy</Text>
+            <Text style={[styles.legalLink, { fontFamily: fonts.medium }]}>Privacy Policy</Text>
           </TouchableOpacity>
           <Text style={styles.legalSep}>·</Text>
           <TouchableOpacity onPress={() => Linking.openURL(DATA_DELETION_URL)}>
-            <Text style={styles.legalLink}>Data Deletion</Text>
+            <Text style={[styles.legalLink, { fontFamily: fonts.medium }]}>Data Deletion</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -132,75 +220,106 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.auraBg,
   },
-  scrollContent: {
+  scroll: {
     flexGrow: 1,
-    paddingHorizontal: 24,
-    paddingTop: 80,
-    paddingBottom: 40,
+    paddingHorizontal: 28,
   },
-  logoContainer: {
+  hero: {
     alignItems: 'center',
-    marginBottom: 32,
-  },
-  logoImage: {
-    width: 160,
-    height: 88,
+    gap: 14,
+    marginBottom: 36,
   },
   title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.textPrimary,
+    fontSize: 30,
+    color: t.text,
     textAlign: 'center',
-    marginBottom: 8,
+    letterSpacing: -0.5,
+    marginTop: 4,
   },
   subtitle: {
     fontSize: 16,
-    color: colors.textSecondary,
+    color: t.text2,
     textAlign: 'center',
-    marginBottom: 40,
   },
   form: {
-    gap: 16,
+    gap: 14,
+  },
+  googleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingVertical: 15,
+    borderRadius: t.rMd,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: t.glassLine2,
+  },
+  googleBtnText: {
+    fontSize: 15,
+    color: t.text,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginVertical: 2,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: t.line,
+  },
+  dividerText: {
+    fontSize: 13,
+    color: t.text3,
   },
   input: {
-    backgroundColor: colors.cardBackground,
+    backgroundColor: 'rgba(18,26,44,0.85)',
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    borderColor: t.glassLine,
+    borderRadius: t.rMd,
+    paddingHorizontal: 18,
+    paddingVertical: 15,
     fontSize: 16,
-    color: colors.textPrimary,
+    color: t.text,
   },
   inputFocused: {
-    borderColor: colors.primary,
+    borderColor: t.auraAqua,
   },
-  button: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
+  ctaBtn: {
+    borderRadius: t.rMd,
     paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 8,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    marginTop: 4,
   },
-  buttonDisabled: {
+  ctaBtnDisabled: {
     opacity: 0.7,
   },
-  buttonText: {
+  ctaBtnText: {
     fontSize: 16,
-    fontWeight: '700',
-    color: colors.textPrimary,
+    color: '#0b0a1a',
+  },
+  switchRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  switchText: {
+    fontSize: 14,
+    color: t.text2,
+  },
+  switchLink: {
+    fontSize: 14,
+    color: t.auraAqua,
   },
   errorText: {
-    color: colors.error,
-    fontSize: 14,
+    fontSize: 13,
+    color: t.red,
+    textAlign: 'center',
     paddingHorizontal: 4,
   },
   legalRow: {
@@ -209,15 +328,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     marginTop: 32,
-    paddingBottom: 8,
   },
   legalLink: {
     fontSize: 12,
-    color: colors.textSecondary,
+    color: t.text3,
     textDecorationLine: 'underline',
   },
   legalSep: {
     fontSize: 12,
-    color: colors.textSecondary,
+    color: t.text3,
   },
 });
