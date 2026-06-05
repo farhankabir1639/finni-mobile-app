@@ -77,7 +77,7 @@ Built for an Android-first launch targeting Bangladesh and emerging markets.
 |-------|-----------|
 | Mobile framework | React Native + Expo SDK 54 |
 | Backend & Auth | Supabase (PostgreSQL + RLS) |
-| AI | Google Gemini API (gemini-2.5-flash-lite) |
+| AI | Google Gemini API (gemini-2.0-flash-lite) |
 | Design system | Aurora (dark glassmorphic, Plus Jakarta Sans) |
 | Build system | EAS Build |
 | Language | TypeScript |

@@ -32,7 +32,7 @@ function resolveCategoryFuzzy(
 
 // Legacy client-side key — used as fallback during migration, removed in Phase 3
 const GEMINI_API_KEY_LEGACY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-const GEMINI_MODEL = 'gemini-2.5-flash-lite';
+const GEMINI_MODEL = 'gemini-2.0-flash-lite';
 const GEMINI_PROXY_URL = supabaseUrl ? `${supabaseUrl}/functions/v1/gemini-proxy` : null;
 const GEMINI_DIRECT_URL = GEMINI_API_KEY_LEGACY
   ? `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY_LEGACY}`
@@ -53,9 +53,10 @@ async function getAuthToken(): Promise<string | null> {
 
 /** Returns true if the error is an infrastructure error (not a Gemini API error) */
 function isInfraError(status: number): boolean {
+  // 404 from proxy = edge function not deployed yet → fall back to direct
+  // 502/504 = proxy infra failures → fall back to direct
   // 4xx/5xx from Gemini itself (400, 403, 429, 503) should NOT trigger fallback
-  // Only edge function infra errors (502 Bad Gateway, 504 Timeout from proxy, or network failures) should
-  return status === 502 || status === 504 || status === 0;
+  return status === 404 || status === 502 || status === 504 || status === 0;
 }
 
 function getYearWeekKey(): string {
