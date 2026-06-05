@@ -1,18 +1,45 @@
 # Finni — AI-Powered Personal Finance Coach
 
-> Your conversational finance companion. Log expenses, track goals, and get personalized AI insights — all through natural chat.
+> Your conversational finance companion. Log expenses, track goals, manage investments, and get personalized AI insights — all through natural chat.
 
 ![Version](https://img.shields.io/badge/version-1.0.0-brightgreen) ![Platform](https://img.shields.io/badge/platform-Android-blue) ![Build](https://img.shields.io/badge/build-production-success)
 
 ---
 
-## Release — v1.0.0 (Production)
+## Last Updated: June 5, 2026
 
-**Released:** June 2026
-**Build:** versionCode 6 · AAB · Google Play Production
-**Package:** `com.finni.app`
+### Recent Changes (for agents picking up this codebase)
 
-First public production release. Available on the Google Play Store.
+**Design System:** The app uses the **Aurora design system** — a dark, glassmorphic theme with animated blobs, breathing Orb AI avatar, and frosted glass cards. All design tokens live in `src/theme/tokens.ts`. Font: Plus Jakarta Sans.
+
+**UI Redesign Status (Phases 1-7 complete):**
+- Phase 1: Design foundation — tokens, Aurora background, Orb, GlassDock nav, GlassCard, ArcMeter
+- Phase 2: Auth screens — Orb hero, glass inputs, gradient CTA, Google Sign-In
+- Phase 3: Home screen — ArcMeter budget gauge, glass chat bubbles, AI actions (thumbs/regen/report), composer with voice UI
+- Phase 4: Transactions — vertical timeline, category picker sheet, spent/income summary
+- Phase 5: Analytics/Insights — GlowDonut + TrendArea SVG charts, "Finni noticed" AI insights at top, chart-level insights
+- Phase 6: Settings + all modals — gradient avatar, glass rows, Aurora-styled Categories/Goals/Income/Currency/EditProfile modals
+- Phase 7: Investments — portfolio dashboard, allocation bar, holdings list, AI chat integration (INVESTMENT_DATA tag), manual CRUD
+
+**Security hardening applied:**
+- Sentry `beforeSend` sanitizes PII (email, tokens, userMessage)
+- PostHog identify no longer sends email
+- Rate limiting fails closed
+- All `console.log` wrapped with `__DEV__` guards
+- `.gitignore` blocks `*.keystore`
+- Gemini proxy edge function created at `supabase/functions/gemini-proxy/` (not yet deployed — needs `supabase login` + `supabase functions deploy gemini-proxy --project-ref ntsisizkaitqdtcuchpk`)
+- Client-side agents.ts uses proxy-first with legacy key fallback
+
+**Known remaining items:**
+- Deploy the Gemini proxy edge function (Phase 3 of API key migration)
+- Remove `EXPO_PUBLIC_GEMINI_API_KEY` from `eas.json` after proxy is stable
+- Rotate Gemini API key in Google Cloud Console
+- Remove `react-native-chart-kit` from package.json (`npm uninstall react-native-chart-kit`)
+- OnboardingScreen still uses old `colors` import from `src/lib/theme` — should migrate to Aurora tokens
+- Verify Supabase RLS is enabled on all tables (profiles, transactions, categories, financial_goals, income, investments)
+- `investments` table was created on June 5, 2026 — RLS policies are in place
+
+**Supabase project:** `ntsisizkaitqdtcuchpk.supabase.co`
 
 ---
 
@@ -29,14 +56,15 @@ Built for an Android-first launch targeting Bangladesh and emerging markets.
 - 💬 **Conversational expense logging** — log transactions in natural language
 - 📸 **Image-based transaction extraction** — photograph receipts to auto-extract transactions
 - 🧠 **AI category matching** — automatically maps expenses to categories with 70% similarity threshold
-- 📊 **Analytics dashboard** — pie chart, monthly trends, spending breakdowns
+- 📊 **Analytics dashboard** — glowing donut chart, trend area chart, spending breakdowns, AI chart insights
 - 🤖 **Personalized AI insights** — daily coaching based on income, goals, location, and spending patterns
 - 💰 **Income tracking** — monthly, weekly, or annual income sources
 - 🎯 **Goal setting** — savings, debt, investment, and custom goals
+- 📈 **Investment tracking** — manual portfolio with AI chat integration ("bought 10 shares of GP at 450")
 - 🌍 **Multi-currency support** — USD, BDT, EUR, GBP, AUD, CAD, SGD, INR
 - 🚀 **Onboarding flow** — 3-step conversational onboarding
 - ⚙️ **Settings** — categories, goals, income, profile, currency
-- 🔒 **Error monitoring** — Sentry integration for crash reporting
+- 🔒 **Error monitoring** — Sentry integration with PII sanitization
 - 📈 **Product analytics** — PostHog integration for usage insights
 
 ---
@@ -48,10 +76,11 @@ Built for an Android-first launch targeting Bangladesh and emerging markets.
 | Mobile framework | React Native + Expo SDK 54 |
 | Backend & Auth | Supabase (PostgreSQL + RLS) |
 | AI | Google Gemini API (gemini-2.5-flash-lite) |
+| Design system | Aurora (dark glassmorphic, Plus Jakarta Sans) |
 | Build system | EAS Build |
 | Language | TypeScript |
 | Navigation | React Navigation |
-| Error tracking | Sentry |
+| Error tracking | Sentry (with PII sanitization) |
 | Analytics | PostHog |
 
 ---
@@ -122,6 +151,7 @@ The production profile uses `credentialsSource: local` — ensure `credentials.j
 | `categories` | User-defined spending categories with emoji and color |
 | `income` | Income sources with frequency (monthly/weekly/annual) |
 | `financial_goals` | Savings, debt, and investment goals |
+| `investments` | Manual portfolio holdings (stock, crypto, mutual_fund, gold, other) |
 
 All tables are protected by Supabase Row Level Security (RLS).
 
@@ -132,27 +162,46 @@ All tables are protected by Supabase Row Level Security (RLS).
 ```
 finni-mobile-app/
 ├── src/
-│   ├── screens/          # All app screens
-│   │   ├── auth/         # LoginScreen, SignupScreen
-│   │   ├── settings/     # CategoriesModal, GoalsModal, IncomeModal, CurrencyModal, EditProfileModal
+│   ├── screens/              # All app screens
+│   │   ├── auth/             # LoginScreen, SignupScreen
+│   │   ├── settings/         # CategoriesModal, GoalsModal, IncomeModal, CurrencyModal, EditProfileModal
 │   │   ├── HomeScreen.tsx
 │   │   ├── TransactionsScreen.tsx
 │   │   ├── AnalyticsScreen.tsx
+│   │   ├── InvestmentsScreen.tsx
 │   │   ├── SettingsScreen.tsx
+│   │   ├── SplashScreen.tsx
 │   │   └── OnboardingScreen.tsx
-│   ├── contexts/         # React contexts
+│   ├── components/           # Reusable UI components
+│   │   ├── Aurora.tsx        # 5-blob animated atmosphere background
+│   │   ├── Orb.tsx           # Breathing AI avatar with sonar rings
+│   │   ├── ArcMeter.tsx      # SVG circular budget gauge
+│   │   ├── GlassDock.tsx     # Floating glass tab bar
+│   │   ├── GlassCard.tsx     # BlurView card wrapper
+│   │   ├── GlowDonut.tsx     # SVG donut chart with glow
+│   │   ├── TrendArea.tsx     # SVG area chart with gradient
+│   │   └── CategoryPickerSheet.tsx
+│   ├── theme/
+│   │   └── tokens.ts         # Aurora design system tokens (colors, spacing, radii, fonts)
+│   ├── contexts/             # React contexts
 │   │   ├── AuthContext.tsx
 │   │   └── ProfileContext.tsx
-│   ├── lib/              # Core services
-│   │   ├── agents.ts     # Gemini AI agents
-│   │   ├── supabase.ts   # Supabase client
+│   ├── lib/                  # Core services
+│   │   ├── agents.ts         # Gemini AI agents (chat, insights, savings, image, investments)
+│   │   ├── supabase.ts       # Supabase client
+│   │   ├── sentry.ts         # Error reporting with PII sanitization
+│   │   ├── analytics.ts      # PostHog analytics
+│   │   ├── googleAuth.ts     # Google OAuth flow
 │   │   └── seedCategories.ts
-│   └── navigation/       # App navigator
-├── assets/               # Icons, splash screen
-├── .env                  # Local env vars (gitignored)
-├── credentials.json      # Local keystore config (gitignored)
-├── eas.json              # EAS build config
-├── app.json              # Expo config
+│   └── navigation/           # App navigator + tab bar
+├── supabase/
+│   └── functions/
+│       └── gemini-proxy/     # Edge function to proxy Gemini API (not yet deployed)
+├── assets/                   # Icons, splash screen
+├── .env                      # Local env vars (gitignored)
+├── credentials.json          # Local keystore config (gitignored)
+├── eas.json                  # EAS build config
+├── app.json                  # Expo config
 └── README.md
 ```
 
@@ -164,27 +213,47 @@ Finni uses a multi-agent system powered by Gemini:
 
 | Agent | Role |
 |-------|------|
-| **chatAgent** | Parses user messages, matches categories, logs transactions |
+| **chatAgent** | Parses user messages, matches categories, logs transactions and investments |
 | **imageExtractionAgent** | Extracts transactions from receipt photos |
 | **getDailyInsights** | Generates daily spending insights |
 | **getSavingsRecommendations** | Weekly savings tips |
 
+### Structured Data Tags (emitted by Gemini, parsed by agents.ts)
+
+| Tag | Purpose |
+|-----|---------|
+| `TRANSACTION_DATA:{...}` | Log an expense or income |
+| `INVESTMENT_DATA:{...}` | Log a buy/sell investment |
+| `NEW_CATEGORY:{...}` | Create a new spending category |
+| `GOAL_CREATE:{...}` | Create a financial goal |
+| `GOAL_UPDATE:{...}` | Update goal progress |
+| `CATEGORY_BUDGET:{...}` | Set a category budget |
+
 ### Category Matching Logic
 1. Fetch all user categories from Supabase
 2. Score each against Gemini's returned category name
-3. If best match ≥ 70% → use existing category
+3. If best match >= 70% → use existing category
 4. If best match < 70% → auto-create new category
 5. Insert transaction with resolved UUID
+
+### Investment Logic
+1. "bought 10 shares of GP at 450" → `INVESTMENT_DATA:{"name":"Grameenphone","ticker":"GP","asset_type":"stock","quantity":10,"buy_price":450,"action":"buy"}`
+2. If holding exists → weighted average price update
+3. If new → insert
+4. Sell validates ownership (can't sell more than owned)
 
 ---
 
 ## Security
 
 - Supabase anon key is public by design — protected by RLS policies
-- Gemini API key stored as EAS Secret — never committed to git
+- Gemini API key: proxy edge function created (pending deployment), client uses proxy-first with legacy fallback
 - All tables have RLS enabled — users can only access their own data
-- Sentry and PostHog used for observability only — no PII transmitted
-- No sensitive data logged in production
+- Sentry `beforeSend` strips sensitive fields (email, tokens, userMessage, transactionData)
+- PostHog identify sends user ID only — no email
+- Rate limiting fails closed (returns "limit hit" on check failure)
+- No sensitive data logged in production (`__DEV__` guards on all console statements)
+- `.gitignore` blocks `*.keystore`, `*.jks`, `credentials.json`, `.env`
 
 ---
 
@@ -194,7 +263,7 @@ Finni uses a multi-agent system powered by Gemini:
 |-------|-------|
 | Store | Google Play Store |
 | Package | `com.finni.app` |
-| Version | 1.0.0 (versionCode 6) |
+| Version | 1.0.0 (versionCode 7) |
 | Target market | Bangladesh (Android-first) |
 | Distribution | Production |
 | Build type | AAB (Android App Bundle) |
