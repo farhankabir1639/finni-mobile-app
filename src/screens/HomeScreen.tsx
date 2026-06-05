@@ -224,6 +224,17 @@ export default function HomeScreen() {
     return () => waveLoopsRef.current.forEach(l => l.stop());
   }, [isRecording]);
 
+  // Cleanup recording resources on unmount
+  useEffect(() => {
+    return () => {
+      if (recordingTimer.current) { clearInterval(recordingTimer.current); recordingTimer.current = null; }
+      if (audioRecording.current) {
+        audioRecording.current.stopAndUnloadAsync().catch(() => {});
+        audioRecording.current = null;
+      }
+    };
+  }, []);
+
   const startRecording = async () => {
     try {
       const perm = await Audio.requestPermissionsAsync();
@@ -241,6 +252,8 @@ export default function HomeScreen() {
       recordingTimer.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000);
       trackEvent('voice_input_started');
     } catch (e) {
+      // Reset audio mode if recording creation failed
+      try { await Audio.setAudioModeAsync({ allowsRecordingIOS: false }); } catch {}
       if (__DEV__) console.error('[Voice] Start recording error:', e);
       captureError(e, { context: 'startRecording' });
       Alert.alert('Error', 'Could not start recording. Please try again.');
@@ -278,9 +291,9 @@ export default function HomeScreen() {
         return;
       }
 
-      // Transcribe via Gemini
+      // Transcribe via Gemini (M4A container uses AAC codec — send as audio/mp4)
       setIsTyping(true);
-      const transcribed = await transcribeAudio(base64, 'audio/m4a');
+      const transcribed = await transcribeAudio(base64, 'audio/mp4');
       setIsTyping(false);
 
       if (!transcribed.trim()) {
@@ -289,8 +302,13 @@ export default function HomeScreen() {
       }
 
       trackEvent('voice_input_transcribed', { length: transcribed.length });
-      // Feed transcribed text into chat
-      handleSend(transcribed);
+      // Feed transcribed text into chat — guard against concurrent sends
+      if (!isSendingRef.current) {
+        handleSend(transcribed);
+      } else {
+        // A manual send is already in flight — show transcribed text for user to send manually
+        setInputText(transcribed);
+      }
     } catch (e) {
       setIsTyping(false);
       audioRecording.current = null;

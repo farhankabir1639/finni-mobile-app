@@ -53,7 +53,7 @@ export async function saveSession(userId: string, messages: SessionMessage[], da
     }
     await AsyncStorage.setItem(storageKey(userId), JSON.stringify(sessions.slice(0, MAX_SESSIONS)));
   } catch (e) {
-    console.error('[ChatSessions] Save error:', e);
+    if (__DEV__) console.error('[ChatSessions] Save error:', e);
   }
 }
 

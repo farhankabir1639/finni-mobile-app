@@ -84,7 +84,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         setProfile({ ...defaultProfile, onboardingComplete: false });
       }
     } catch (e) {
-      console.error('[ProfileContext] refreshProfile error:', e);
+      if (__DEV__) console.error('[ProfileContext] refreshProfile error:', e);
       captureError(e, { context: 'refreshProfile', userId: user?.id });
       setProfile({ ...defaultProfile, onboardingComplete: false });
     } finally {

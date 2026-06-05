@@ -204,7 +204,7 @@ Input: ${input}`;
     }
     return { response: "I couldn't parse that. Try entering the amount and description manually.", transaction: null };
   } catch (e) {
-    console.error('[Agent1] parseTransaction Error:', e);
+    if (__DEV__) console.error('[Agent1] parseTransaction Error:', e);
     return {
       response: "I'm having trouble connecting right now. Please try again in a moment. 🔄",
       transaction: null,
@@ -357,7 +357,7 @@ Respond ONLY with a valid JSON array (no markdown):
         insights = JSON.parse(cleaned);
         if (!Array.isArray(insights)) insights = [];
       } catch (parseErr) {
-        console.error('[Agent2] JSON parse Error:', parseErr);
+        if (__DEV__) console.error('[Agent2] JSON parse Error:', parseErr);
         insights = [];
       }
 
@@ -376,7 +376,7 @@ Respond ONLY with a valid JSON array (no markdown):
 
       return insights;
     } catch (e) {
-      console.error('[Agent2] Error:', e);
+      if (__DEV__) console.error('[Agent2] Error:', e);
       captureError(e, { context: 'getDailyInsights', userId });
       return [{
         title: 'Insights unavailable',
@@ -470,13 +470,13 @@ Use ${currency} for all amounts. Be specific to the user's actual spending patte
       localizedResults = JSON.parse(cleaned);
       if (!Array.isArray(localizedResults)) localizedResults = [];
     } catch (parseErr) {
-      console.error('[Agent3] JSON parse Error:', parseErr);
+      if (__DEV__) console.error('[Agent3] JSON parse Error:', parseErr);
       localizedResults = [];
     }
     await AsyncStorage.setItem(weekKey, JSON.stringify(localizedResults));
     return localizedResults;
   } catch (e) {
-    console.error('[Agent3] Error:', e);
+    if (__DEV__) console.error('[Agent3] Error:', e);
     captureError(e, { context: 'getWeeklySavingsRecommendations', userId });
     return [];
   }
@@ -554,7 +554,7 @@ function extractTransactionData(text: string): {
     try {
       newCategory = JSON.parse(catMatch[1]) as Record<string, unknown>;
     } catch (e) {
-      console.error('[Agent] Failed to parse NEW_CATEGORY JSON:', e);
+      if (__DEV__) console.error('[Agent] Failed to parse NEW_CATEGORY JSON:', e);
     }
     response = response.replace(NEW_CATEGORY_REGEX, '').trim();
   }
@@ -565,7 +565,7 @@ function extractTransactionData(text: string): {
         goalUpdate = { goal_name: parsed.goal_name, amount: parsed.amount };
       }
     } catch (e) {
-      console.error('[Agent] Failed to parse GOAL_UPDATE JSON:', e);
+      if (__DEV__) console.error('[Agent] Failed to parse GOAL_UPDATE JSON:', e);
     }
     response = response.replace(GOAL_UPDATE_REGEX, '').trim();
   }
@@ -580,7 +580,7 @@ function extractTransactionData(text: string): {
         };
       }
     } catch (e) {
-      console.error('[Agent] Failed to parse GOAL_CREATE JSON:', e);
+      if (__DEV__) console.error('[Agent] Failed to parse GOAL_CREATE JSON:', e);
     }
     response = response.replace(GOAL_CREATE_REGEX, '').trim();
   }
@@ -588,7 +588,7 @@ function extractTransactionData(text: string): {
     try {
       txData = JSON.parse(txMatch[1]) as Record<string, unknown>;
     } catch (e) {
-      console.error('[Agent] Failed to parse TRANSACTION_DATA JSON:', e);
+      if (__DEV__) console.error('[Agent] Failed to parse TRANSACTION_DATA JSON:', e);
       txParseError = true;
     }
     response = response.replace(TRANSACTION_DATA_REGEX, '').trim();
@@ -603,7 +603,7 @@ function extractTransactionData(text: string): {
         categoryBudgetUpdate = { category_name: parsed.category_name, budget: parsed.budget };
       }
     } catch (e) {
-      console.error('[Agent] Failed to parse CATEGORY_BUDGET JSON:', e);
+      if (__DEV__) console.error('[Agent] Failed to parse CATEGORY_BUDGET JSON:', e);
     }
     response = response.replace(CATEGORY_BUDGET_REGEX, '').trim();
   }
@@ -873,10 +873,13 @@ Current user message: ${userMessage}`;
       };
     }
 
-    // If investment data is present, skip transaction processing entirely
+    // If valid investment data is present, skip transaction processing entirely
     // (prevents double-logging when Gemini emits both tags)
     if (investmentData && investmentData.quantity > 0 && investmentData.buy_price > 0) {
       txData = null;
+    } else if (investmentData) {
+      // Investment data is malformed — discard it and keep the transaction
+      investmentData = null;
     }
 
     // Fallback: if Gemini dropped TRANSACTION_DATA but wrote "✅ Logged $X under Y.", parse it directly
@@ -946,7 +949,7 @@ Current user message: ${userMessage}`;
           });
 
         if (catError) {
-          console.error('[Agent1] Standalone category create error:', catError);
+          if (__DEV__) console.error('[Agent1] Standalone category create error:', catError);
           return {
             response: "I tried to create the category but something went wrong. Please try again.",
             transaction: null,
@@ -1071,7 +1074,7 @@ Current user message: ${userMessage}`;
                 matchingScore = bestMatch?.score ?? 0;
                 allCategories?.push({ id: newCat.id, name: newCatName });
               } else {
-                console.error('[Agent1] Auto-create category failed:', newCatError);
+                if (__DEV__) console.error('[Agent1] Auto-create category failed:', newCatError);
                 return {
                   response: "I couldn't find or create a category for this. Please add it manually in Settings → Categories.",
                   transaction: null,
@@ -1106,7 +1109,7 @@ Current user message: ${userMessage}`;
         console.log('[Agent1] Insert result error:', JSON.stringify(error));
       }
       if (error) {
-        console.error('[Agent1] Insert error:', error);
+        if (__DEV__) console.error('[Agent1] Insert error:', error);
         return {
           response: `I parsed that but couldn't save it: ${error.message}. Try again!`,
           transaction: null,
@@ -1132,7 +1135,7 @@ Current user message: ${userMessage}`;
             .eq('id', goal.id)
             .eq('user_id', userId);
           if (goalError) {
-            console.error('[Agent1] Goal update error:', goalError);
+            if (__DEV__) console.error('[Agent1] Goal update error:', goalError);
           } else {
             if (__DEV__) console.log(`[Agent1] Goal "${goal.name}" updated: ${goal.current_amount} → ${newAmount}`);
           }
@@ -1216,7 +1219,7 @@ Current user message: ${userMessage}`;
         target_date: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
       });
       if (gcError) {
-        console.error('[Agent1] Goal create error:', gcError);
+        if (__DEV__) console.error('[Agent1] Goal create error:', gcError);
       } else {
         if (__DEV__) console.log(`[Agent1] Goal created: "${goalCreate.name}" target=${goalCreate.target_amount}`);
         clearAgentCache(userId).catch(() => {});
@@ -1528,7 +1531,7 @@ export async function saveImageTransactions(
       lines.push(`• ${tx.description}: ${sign}${currencySymbol}${tx.amount.toFixed(2)} (${catName})`);
     } else {
       failCount++;
-      console.error('[ImageAgent] Insert error:', tx.description, error);
+      if (__DEV__) console.error('[ImageAgent] Insert error:', tx.description, error);
       captureError(error, { context: 'saveImageTransactions.insert', userId, description: tx.description });
     }
   }

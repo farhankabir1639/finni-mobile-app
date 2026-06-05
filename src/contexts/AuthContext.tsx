@@ -58,7 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signUp = async (email: string, password: string, fullName?: string) => {
     if (__DEV__) console.log('[AuthContext] signUp called', { hasEmail: !!email, hasPassword: !!password, hasFullName: !!fullName, hasSupabaseConfig });
     if (!hasSupabaseConfig) {
-      console.error('[AuthContext] Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY');
+      if (__DEV__) console.error('[AuthContext] Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY');
       return { error: new Error('App configuration error. Please check your environment variables.') };
     }
     try {
@@ -69,12 +69,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       if (__DEV__) console.log('[AuthContext] signUp result', { hasUser: !!data?.user, error: error?.message ?? null });
       if (error) {
-        console.warn('[AuthContext] signUp error', error.message, error);
+        if (__DEV__) console.warn('[AuthContext] signUp error', error.message, error);
         return { error: error as Error };
       }
       return { error: null };
     } catch (err) {
-      console.error('[AuthContext] signUp exception', err);
+      if (__DEV__) console.error('[AuthContext] signUp exception', err);
       captureError(err, { context: 'signUp' });
       return { error: err instanceof Error ? err : new Error(String(err)) };
     }

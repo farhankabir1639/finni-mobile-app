@@ -176,8 +176,10 @@ export default function OnboardingScreen() {
     finally { setIsSaving(false); advance(); }
   };
 
+  const completingRef = useRef(false);
   const completeOnboarding = React.useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id || completingRef.current) return;
+    completingRef.current = true;
     try {
       const { error } = await supabase.from('profiles')
         .upsert({ id: user.id, onboarding_complete: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: 'id' });

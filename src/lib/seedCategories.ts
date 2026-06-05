@@ -32,8 +32,8 @@ export async function seedDefaultCategories(userId: string): Promise<void> {
 
   const { error } = await supabase.from('categories').insert(payload);
   if (error) {
-    console.error('[seedCategories] Failed to seed default categories:', error);
+    if (__DEV__) console.error('[seedCategories] Failed to seed default categories:', error);
   } else {
-    console.log('[seedCategories] Default categories seeded for user:', userId);
+    if (__DEV__) console.log('[seedCategories] Default categories seeded for user:', userId);
   }
 }
