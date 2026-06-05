@@ -1574,3 +1574,64 @@ export async function clearAgentCache(userId: string): Promise<void> {
   );
   if (toRemove.length > 0) await AsyncStorage.multiRemove(toRemove);
 }
+
+// --- Voice transcription via Gemini ---
+const MAX_AUDIO_BASE64_BYTES = 10 * 1024 * 1024; // 10MB
+
+export async function transcribeAudio(base64Audio: string, mimeType: string): Promise<string> {
+  if (!GEMINI_PROXY_URL && !GEMINI_DIRECT_URL) throw new Error('Gemini is not configured');
+  if (base64Audio.length > MAX_AUDIO_BASE64_BYTES) throw new Error('Audio file too large');
+
+  const token = await getAuthToken();
+  const useProxy = !!(GEMINI_PROXY_URL && token);
+  const url = useProxy ? GEMINI_PROXY_URL! : GEMINI_DIRECT_URL!;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (useProxy) headers['Authorization'] = `Bearer ${token}`;
+
+  const body = JSON.stringify({
+    contents: [{
+      role: 'user',
+      parts: [
+        { text: 'Transcribe this audio exactly as spoken. Return ONLY the transcribed text, nothing else. If the audio is unclear or empty, return an empty string.' },
+        { inlineData: { mimeType, data: base64Audio } },
+      ],
+    }],
+    generationConfig: { temperature: 0.1, maxOutputTokens: 1024 },
+  });
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    let res: Response;
+    try {
+      res = await fetch(url, { method: 'POST', headers, body, signal: controller.signal });
+    } catch (fetchErr) {
+      if (useProxy && GEMINI_DIRECT_URL) {
+        res = await fetch(GEMINI_DIRECT_URL, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: controller.signal,
+        });
+      } else { throw fetchErr; }
+    }
+    clearTimeout(timeoutId);
+
+    if (useProxy && isInfraError(res.status) && GEMINI_DIRECT_URL) {
+      res = await fetch(GEMINI_DIRECT_URL, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
+      });
+    }
+
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(`Transcription failed: ${res.status} - ${(errBody as any)?.error?.message ?? ''}`);
+    }
+
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
+    return text;
+  } catch (e) {
+    clearTimeout(timeoutId);
+    if (e instanceof Error && e.name === 'AbortError') throw new Error('Transcription request timed out');
+    throw e;
+  }
+}
