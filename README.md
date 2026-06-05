@@ -31,13 +31,15 @@
 - Client-side agents.ts uses proxy-first with legacy key fallback
 
 **Known remaining items:**
-- Deploy the Gemini proxy edge function (Phase 3 of API key migration)
-- Remove `EXPO_PUBLIC_GEMINI_API_KEY` from `eas.json` after proxy is stable
-- Rotate Gemini API key in Google Cloud Console
-- Remove `react-native-chart-kit` from package.json (`npm uninstall react-native-chart-kit`)
-- OnboardingScreen still uses old `colors` import from `src/lib/theme` — should migrate to Aurora tokens
+- Deploy the Gemini proxy edge function — run `supabase login` then `supabase functions deploy gemini-proxy --project-ref ntsisizkaitqdtcuchpk`
+- Rotate Gemini API key in Google Cloud Console (key was previously exposed client-side)
 - Verify Supabase RLS is enabled on all tables (profiles, transactions, categories, financial_goals, income, investments)
-- `investments` table was created on June 5, 2026 — RLS policies are in place
+
+**Completed items (June 5, 2026):**
+- ✅ Removed `EXPO_PUBLIC_GEMINI_API_KEY` from `eas.json` (all 3 build profiles)
+- ✅ Removed `react-native-chart-kit` from package.json
+- ✅ OnboardingScreen migrated from old `colors` import to Aurora tokens (`t` from `src/theme/tokens`)
+- ✅ `investments` table created with RLS policies in place
 
 **Supabase project:** `ntsisizkaitqdtcuchpk.supabase.co`
 

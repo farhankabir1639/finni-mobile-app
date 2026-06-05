@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfile, CURRENCIES } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
-import { colors } from '../lib/theme';
+import { t } from '../theme/tokens';
 import { seedDefaultCategories } from '../lib/seedCategories';
 
 
@@ -313,21 +313,21 @@ export default function OnboardingScreen() {
             {/* ── Step 1: Who are you? ── */}
             {step === 0 && (
               <View style={styles.stepContent}>
-                <Text style={styles.fieldLabel}>What's your name? <Text style={{ color: colors.error }}>*</Text></Text>
+                <Text style={styles.fieldLabel}>What's your name? <Text style={{ color: t.red }}>*</Text></Text>
                 <TextInput
                   style={styles.input}
                   placeholder="Your name"
-                  placeholderTextColor={colors.textSecondary}
+                  placeholderTextColor={t.text2}
                   value={name}
                   onChangeText={setName}
                   autoCapitalize="words"
                 />
 
-                <Text style={styles.fieldLabel}>Where are you based? <Text style={{ color: colors.error }}>*</Text></Text>
+                <Text style={styles.fieldLabel}>Where are you based? <Text style={{ color: t.red }}>*</Text></Text>
                 <TextInput
                   style={styles.input}
                   placeholder="City, Country (e.g. Dhaka, Bangladesh)"
-                  placeholderTextColor={colors.textSecondary}
+                  placeholderTextColor={t.text2}
                   value={location}
                   onChangeText={setLocation}
                 />
@@ -355,14 +355,14 @@ export default function OnboardingScreen() {
               <View style={styles.stepContent}>
                 <Text style={styles.fieldLabel}>
                   What's your monthly income?{' '}
-                  <Text style={{ color: colors.error }}>*</Text>
+                  <Text style={{ color: t.red }}>*</Text>
                 </Text>
                 <View style={styles.inputWithPrefix}>
                   <Text style={styles.inputPrefix}>{currencySymbol}</Text>
                   <TextInput
                     style={styles.inputPrefixed}
                     placeholder="0.00"
-                    placeholderTextColor={colors.textSecondary}
+                    placeholderTextColor={t.text2}
                     value={incomeAmount}
                     onChangeText={setIncomeAmount}
                     keyboardType="decimal-pad"
@@ -371,7 +371,7 @@ export default function OnboardingScreen() {
                 <TextInput
                   style={[styles.input, { marginTop: 8 }]}
                   placeholder="Label (e.g. Salary, Freelance)"
-                  placeholderTextColor={colors.textSecondary}
+                  placeholderTextColor={t.text2}
                   value={incomeLabel}
                   onChangeText={setIncomeLabel}
                 />
@@ -385,7 +385,7 @@ export default function OnboardingScreen() {
                   <TextInput
                     style={styles.inputPrefixed}
                     placeholder="0.00"
-                    placeholderTextColor={colors.textSecondary}
+                    placeholderTextColor={t.text2}
                     value={budget}
                     onChangeText={(text) => {
                       budgetManuallySet.current = true;
@@ -430,7 +430,7 @@ export default function OnboardingScreen() {
                       value={goalName}
                       onChangeText={setGoalName}
                       placeholder="e.g. Emergency fund"
-                      placeholderTextColor={colors.textSecondary}
+                      placeholderTextColor={t.text2}
                     />
                     <Text style={styles.fieldLabel}>
                       Target amount <Text style={styles.optional}>(optional)</Text>
@@ -440,7 +440,7 @@ export default function OnboardingScreen() {
                       <TextInput
                         style={styles.inputPrefixed}
                         placeholder="0.00"
-                        placeholderTextColor={colors.textSecondary}
+                        placeholderTextColor={t.text2}
                         value={targetAmount}
                         onChangeText={setTargetAmount}
                         keyboardType="decimal-pad"
@@ -452,7 +452,7 @@ export default function OnboardingScreen() {
                     <TextInput
                       style={styles.input}
                       placeholder="e.g. 2026-12-31"
-                      placeholderTextColor={colors.textSecondary}
+                      placeholderTextColor={t.text2}
                       value={deadline}
                       onChangeText={setDeadline}
                     />
@@ -498,7 +498,7 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.auraBg,
   },
   flex: {
     flex: 1,
@@ -517,7 +517,7 @@ const styles = StyleSheet.create({
   },
   backBtnText: {
     fontSize: 30,
-    color: colors.primary,
+    color: t.auraIndigo,
     fontWeight: '600',
     lineHeight: 34,
   },
@@ -532,10 +532,10 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 4,
     borderRadius: 2,
-    backgroundColor: colors.border,
+    backgroundColor: t.glassLine,
   },
   progressSegmentActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: t.auraIndigo,
   },
   scrollContent: {
     paddingHorizontal: 20,
@@ -552,7 +552,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: colors.primary,
+    backgroundColor: t.auraIndigo,
     justifyContent: 'center',
     alignItems: 'center',
     flexShrink: 0,
@@ -561,7 +561,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: colors.primary,
+    backgroundColor: t.auraIndigo,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
@@ -573,16 +573,16 @@ const styles = StyleSheet.create({
   },
   finniMessageBubble: {
     flex: 1,
-    backgroundColor: colors.cardBackground,
+    backgroundColor: t.glass2,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.glassLine,
     borderRadius: 16,
     borderBottomLeftRadius: 4,
     padding: 16,
   },
   finniMessageText: {
     fontSize: 15,
-    color: colors.textPrimary,
+    color: t.text,
     lineHeight: 22,
     fontWeight: '500',
   },
@@ -592,35 +592,35 @@ const styles = StyleSheet.create({
   fieldLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.textPrimary,
+    color: t.text,
     marginBottom: 8,
     marginTop: 12,
   },
   optional: {
-    color: colors.textSecondary,
+    color: t.text2,
     fontWeight: '400',
   },
   input: {
-    backgroundColor: colors.cardBackground,
+    backgroundColor: t.glass2,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.glassLine,
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
-    color: colors.textPrimary,
+    color: t.text,
   },
   inputWithPrefix: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.cardBackground,
+    backgroundColor: t.glass2,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.glassLine,
     borderRadius: 12,
   },
   inputPrefix: {
     fontSize: 18,
-    color: colors.textSecondary,
+    color: t.text2,
     paddingLeft: 16,
     paddingRight: 8,
     fontWeight: '600',
@@ -630,11 +630,11 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingRight: 16,
     fontSize: 16,
-    color: colors.textPrimary,
+    color: t.text,
   },
   hint: {
     fontSize: 12,
-    color: colors.textSecondary,
+    color: t.text2,
     marginTop: 6,
     marginLeft: 4,
   },
@@ -644,21 +644,21 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   pill: {
-    backgroundColor: colors.cardBackground,
+    backgroundColor: t.glass2,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.glassLine,
     borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
   pillActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    backgroundColor: t.auraIndigo,
+    borderColor: t.auraIndigo,
   },
   pillText: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.textSecondary,
+    color: t.text2,
   },
   pillTextActive: {
     color: '#FFFFFF',
@@ -671,16 +671,16 @@ const styles = StyleSheet.create({
   },
   goalCard: {
     width: '47%',
-    backgroundColor: colors.cardBackground,
+    backgroundColor: t.glass2,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.glassLine,
     borderRadius: 16,
     padding: 20,
     alignItems: 'center',
     gap: 8,
   },
   goalCardActive: {
-    borderColor: colors.primary,
+    borderColor: t.auraIndigo,
     backgroundColor: 'rgba(99, 102, 241, 0.12)',
   },
   goalEmoji: {
@@ -689,11 +689,11 @@ const styles = StyleSheet.create({
   goalLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.textSecondary,
+    color: t.text2,
     textAlign: 'center',
   },
   goalLabelActive: {
-    color: colors.primary,
+    color: t.auraIndigo,
   },
   goalDetails: {
     marginTop: 8,
@@ -706,7 +706,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   ctaButton: {
-    backgroundColor: colors.primary,
+    backgroundColor: t.auraIndigo,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',
@@ -725,7 +725,7 @@ const styles = StyleSheet.create({
   },
   skipText: {
     fontSize: 14,
-    color: colors.textSecondary,
+    color: t.text2,
   },
   completionContainer: {
     flex: 1,
@@ -737,13 +737,13 @@ const styles = StyleSheet.create({
   completionTitle: {
     fontSize: 28,
     fontWeight: '800',
-    color: colors.textPrimary,
+    color: t.text,
     textAlign: 'center',
     marginTop: 8,
   },
   completionSubtitle: {
     fontSize: 16,
-    color: colors.textSecondary,
+    color: t.text2,
     textAlign: 'center',
   },
 });
