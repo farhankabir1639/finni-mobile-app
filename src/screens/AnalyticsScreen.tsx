@@ -14,11 +14,10 @@ import { useNavigation } from '@react-navigation/native';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCalendars } from 'expo-localization';
-import { PieChart } from 'react-native-chart-kit';
+import Svg, { Path } from 'react-native-svg';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfile } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
-import { colors } from '../lib/theme';
 import {
   getDailyInsights,
   getWeeklySavingsRecommendations,
@@ -28,23 +27,42 @@ import {
 } from '../lib/agents';
 import { captureError } from '../lib/sentry';
 import { trackScreen } from '../lib/analytics';
+import { t, fonts } from '../theme/tokens';
+import Aurora from '../components/Aurora';
+import GlassCard from '../components/GlassCard';
+import GlowDonut from '../components/GlowDonut';
+import TrendArea from '../components/TrendArea';
+import Orb from '../components/Orb';
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const PIE_COLORS = [
-  '#6366F1',
-  '#8B5CF6',
-  '#EC4899',
-  '#F59E0B',
-  '#10B981',
-  '#3B82F6',
-  '#EF4444',
-  '#F97316',
-  '#14B8A6',
-  '#84CC16',
-  '#6B7280',
-];
+// ── Category visual mapping ──
+const CAT_COLORS: Record<string, string> = {
+  food: t.catFood,
+  transport: t.catTransport,
+  shopping: t.catShopping,
+  bills: t.catBills,
+  income: t.catIncome,
+  uncategorized: t.catUncat,
+};
 
+function getCatColor(name: string): string {
+  const key = (name ?? '').toLowerCase().replace(/\s+/g, '');
+  return CAT_COLORS[key] ?? t.catUncat;
+}
+
+const CATEGORY_EMOJI: Record<string, string> = {
+  food: '🍔', transport: '🚗', shopping: '🛒', entertainment: '🎬',
+  bills: '📄', groceries: '🛒', dining: '🍽️', coffee: '☕',
+  travel: '✈️', health: '💊', default: '💰',
+};
+
+function getCategoryEmoji(category: string | null): string {
+  if (!category) return CATEGORY_EMOJI.default;
+  return CATEGORY_EMOJI[category.toLowerCase().replace(/\s+/g, '')] ?? CATEGORY_EMOJI.default;
+}
+
+// ── Types ──
 type Transaction = {
   id: string;
   user_id: string;
@@ -58,36 +76,9 @@ type Transaction = {
 };
 
 type CategoryTotal = { name: string; amount: number };
-
 type PeriodOption = 'week' | 'month' | '3months' | 'year';
 
-const CATEGORY_EMOJI: Record<string, string> = {
-  food: '🍔',
-  transport: '🚗',
-  shopping: '🛒',
-  entertainment: '🎬',
-  bills: '📄',
-  groceries: '🛒',
-  dining: '🍽️',
-  coffee: '☕',
-  travel: '✈️',
-  health: '💊',
-  default: '💰',
-};
-
-function getCategoryEmoji(category: string | null): string {
-  if (!category) return CATEGORY_EMOJI.default;
-  const key = category.toLowerCase().replace(/\s+/g, '');
-  return CATEGORY_EMOJI[key] ?? CATEGORY_EMOJI.default;
-}
-
-function getCategoryColor(category: string | null): string {
-  if (!category) return PIE_COLORS[0];
-  let hash = 0;
-  for (let i = 0; i < category.length; i++) hash = category.charCodeAt(i) + ((hash << 5) - hash);
-  return PIE_COLORS[Math.abs(hash) % PIE_COLORS.length];
-}
-
+// ── Helpers ──
 function getPeriodStart(period: PeriodOption): Date {
   const now = new Date();
   const start = new Date(now);
@@ -108,16 +99,8 @@ function getPeriodStart(period: PeriodOption): Date {
   return start;
 }
 
-function formatLastUpdated(date: Date | null): string {
-  if (!date) return '';
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000);
-  if (diffDays === 0) return 'Last updated: today';
-  if (diffDays === 1) return 'Last updated: 1 day ago';
-  return `Last updated: ${diffDays} days ago`;
+function analyticsCacheKey(userId: string, date: string): string {
+  return `analytics_cache_${userId}_${date}`;
 }
 
 function prepareChartData(categoryTotals: CategoryTotal[]): CategoryTotal[] {
@@ -129,17 +112,91 @@ function prepareChartData(categoryTotals: CategoryTotal[]): CategoryTotal[] {
   return top10;
 }
 
-function analyticsCacheKey(userId: string, date: string): string {
-  return `analytics_cache_${userId}_${date}`;
-}
-
-const INSIGHT_TYPE_CONFIG: Record<string, { color: string; icon: string }> = {
-  warning: { color: '#F59E0B', icon: '⚠️' },
-  tip: { color: '#3B82F6', icon: '💡' },
-  goal: { color: '#10B981', icon: '🎯' },
-  income_alert: { color: '#EF4444', icon: '🚨' },
+// ── Insight tone mapping ──
+const INSIGHT_TONE: Record<string, string> = {
+  warning: t.amber,
+  tip: t.auraAqua,
+  goal: t.auraViolet,
+  income_alert: t.red,
 };
 
+const INSIGHT_ICON: Record<string, string> = {
+  warning: 'alert',
+  tip: 'wallet',
+  goal: 'target',
+  income_alert: 'alert',
+};
+
+// ── Chart Insight component (mini-insight below charts) ──
+function ChartInsight({ text, tone }: { text: string; tone: string }) {
+  const color = tone === 'amber' ? t.amber : tone === 'rose' ? t.auraRose : tone === 'aqua' ? t.auraAqua : tone === 'violet' ? t.auraViolet : t.auraBlue;
+  return (
+    <View style={[s.chartInsight, { borderTopColor: t.glassLine }]}>
+      <View style={[s.chartInsightBadge, { backgroundColor: color + '2E' }]}>
+        <Orb size={16} rings={false} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[s.chartInsightLabel, { color }]}>FINNI INSIGHT</Text>
+        <Text style={s.chartInsightText}>{text}</Text>
+      </View>
+    </View>
+  );
+}
+
+// ── GChip ──
+function GChip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.8}
+      style={[s.chip, active && s.chipActive]}
+    >
+      <Text style={[s.chipText, active && s.chipTextActive]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+// ── Bar component ──
+function Bar({ pct, color, height = 5, delay = 0 }: { pct: number; color: string; height?: number; delay?: number }) {
+  return (
+    <View style={[s.barTrack, { height }]}>
+      <View
+        style={[
+          s.barFill,
+          {
+            width: `${Math.min(100, pct)}%`,
+            height,
+            backgroundColor: color,
+          },
+        ]}
+      />
+    </View>
+  );
+}
+
+// ── CatIcon ──
+function CatIcon({ name, size = 36, radius = 11 }: { name: string; size?: number; radius?: number }) {
+  const color = getCatColor(name);
+  const emoji = getCategoryEmoji(name);
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: radius,
+        backgroundColor: color + '28',
+        borderWidth: 1,
+        borderColor: color + '45',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Text style={{ fontSize: size * 0.44 }}>{emoji}</Text>
+    </View>
+  );
+}
+
+// ══════════════ MAIN SCREEN ══════════════
 export default function AnalyticsScreen() {
   const navigation = useNavigation();
   const { user } = useAuth();
@@ -180,7 +237,6 @@ export default function AnalyticsScreen() {
     setShowPromptEditor(false);
   };
 
-  // Fetch fresh insights from Gemini, cache result with today's local-date key
   const fetchAndCacheInsights = useCallback(async () => {
     if (!user?.id) return;
     const tz = getCalendars()[0]?.timeZone ?? 'UTC';
@@ -192,12 +248,11 @@ export default function AnalyticsScreen() {
 
     try {
       await clearAgentCache(user.id);
-
       const now = new Date();
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
       const monthTx = transactions
-        .filter((t) => new Date(t.date) >= startOfMonth)
-        .map((t) => ({ ...t, category: t.category ?? null }));
+        .filter((tx) => new Date(tx.date) >= startOfMonth)
+        .map((tx) => ({ ...tx, category: tx.category ?? null }));
 
       const [freshInsights, freshSavings] = await Promise.all([
         getDailyInsights(user.id, monthTx, userInsightPrompt || undefined),
@@ -220,8 +275,8 @@ export default function AnalyticsScreen() {
         JSON.stringify({ insights: insightsList, savings: savingsList, updatedAt: updatedAt.toISOString() })
       );
     } catch (e) {
-      console.error('[Analytics] Insights error:', e);
-      captureError(e, { context: 'fetchInsights', userId: user?.id });
+      if (__DEV__) console.error('[Analytics] Insights error:', e);
+      captureError(e, { context: 'fetchInsights' });
       setInsightsError('Failed to load insights. Tap Refresh to try again.');
       setShowRefreshButton(true);
     } finally {
@@ -229,15 +284,12 @@ export default function AnalyticsScreen() {
     }
   }, [user?.id, transactions, userInsightPrompt]);
 
-  // On load: check today's cache → auto-fetch if transactions today → fall back to yesterday
   const syncInsights = useCallback(async () => {
     if (!user?.id || transactions.length < 1) return;
-
     const tz = getCalendars()[0]?.timeZone ?? 'UTC';
     const localDate = new Date().toLocaleDateString('en-CA', { timeZone: tz });
     const cacheKey = analyticsCacheKey(user.id, localDate);
 
-    // 1. Today's cache exists → show it, no Refresh button
     const cached = await AsyncStorage.getItem(cacheKey);
     if (cached) {
       const { insights: ci, savings: cs, updatedAt } = JSON.parse(cached);
@@ -248,16 +300,11 @@ export default function AnalyticsScreen() {
       return;
     }
 
-    // 2. Has transactions logged today → auto-fetch fresh insights
     const hasTodayTx = transactions.some(
-      (t) => new Date(t.date).toLocaleDateString('en-CA', { timeZone: tz }) === localDate
+      (tx) => new Date(tx.date).toLocaleDateString('en-CA', { timeZone: tz }) === localDate
     );
-    if (hasTodayTx) {
-      await fetchAndCacheInsights();
-      return;
-    }
+    if (hasTodayTx) { await fetchAndCacheInsights(); return; }
 
-    // 3. No transactions today → load yesterday's cached insights + show Refresh
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     const yesterdayDate = yesterday.toLocaleDateString('en-CA', { timeZone: tz });
@@ -272,11 +319,7 @@ export default function AnalyticsScreen() {
   }, [user?.id, transactions, fetchAndCacheInsights]);
 
   const fetchAll = useCallback(async () => {
-    if (!user?.id) {
-      setLoading(false);
-      setTransactions([]);
-      return;
-    }
+    if (!user?.id) { setLoading(false); setTransactions([]); return; }
     setLoading(true);
     syncAttemptedRef.current = false;
 
@@ -287,16 +330,9 @@ export default function AnalyticsScreen() {
     ]);
 
     setLoading(false);
-
-    if (txRes.error) {
-      console.warn('[Analytics] Transactions fetch error:', txRes.error);
-      setTransactions([]);
-    } else {
-      setTransactions((txRes.data as Transaction[]) ?? []);
-    }
-
+    if (txRes.error) { setTransactions([]); }
+    else { setTransactions((txRes.data as Transaction[]) ?? []); }
     if (!catRes.error) setCategories(catRes.data ?? []);
-
     if (!incomeRes.error) {
       const total = (incomeRes.data ?? []).reduce((sum, r) => {
         const amt = Number(r.amount) || 0;
@@ -308,14 +344,8 @@ export default function AnalyticsScreen() {
     }
   }, [user?.id]);
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchAll();
-      trackScreen('AnalyticsScreen');
-    }, [fetchAll])
-  );
+  useFocusEffect(useCallback(() => { fetchAll(); trackScreen('AnalyticsScreen'); }, [fetchAll]));
 
-  // Run sync once per focus after transactions are loaded
   useEffect(() => {
     if (transactions.length >= 10 && user?.id && !syncAttemptedRef.current) {
       syncAttemptedRef.current = true;
@@ -326,28 +356,28 @@ export default function AnalyticsScreen() {
   const periodStart = useMemo(() => getPeriodStart(period), [period]);
 
   const filteredTransactions = useMemo(
-    () => transactions.filter((t) => new Date(t.date) >= periodStart),
+    () => transactions.filter((tx) => new Date(tx.date) >= periodStart),
     [transactions, periodStart]
   );
 
-  const { totalSpent, totalSaved, byCategory, monthlyData } = useMemo(() => {
+  const { totalSpent, totalIncome, byCategory, trendData } = useMemo(() => {
     let spent = 0;
-    let saved = 0;
+    let income = 0;
     const categoryMap: Record<string, number> = {};
     const monthMap: Record<string, number> = {};
 
-    for (const t of filteredTransactions) {
-      if (t.type === 'expense') {
-        const w = Number(t.withdrawal) || 0;
+    for (const tx of filteredTransactions) {
+      if (tx.type === 'expense') {
+        const w = Number(tx.withdrawal) || 0;
         spent += w;
-        const categoryObj = categories.find((c) => c.id === t.category_id);
-        const cat = categoryObj?.name ?? 'Uncategorized';
+        const catObj = categories.find((c) => c.id === tx.category_id);
+        const cat = catObj?.name ?? 'Uncategorized';
         categoryMap[cat] = (categoryMap[cat] ?? 0) + w;
-        const d = new Date(t.date);
+        const d = new Date(tx.date);
         const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
         monthMap[key] = (monthMap[key] ?? 0) + w;
       } else {
-        saved += Number(t.deposit) || 0;
+        income += Number(tx.deposit) || 0;
       }
     }
 
@@ -356,29 +386,59 @@ export default function AnalyticsScreen() {
       .sort((a, b) => b.amount - a.amount);
 
     const now = new Date();
-    const last6Months: { key: string; label: string; amount: number }[] = [];
+    const trendData = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      last6Months.push({
-        key,
+      trendData.push({
         label: d.toLocaleDateString('en-US', { month: 'short' }),
-        amount: monthMap[key] ?? 0,
+        value: monthMap[key] ?? 0,
+        isCurrent: i === 0,
       });
     }
 
-    const maxMonthly = Math.max(...last6Months.map((m) => m.amount), 1);
-
-    return {
-      totalSpent: spent,
-      totalSaved: saved,
-      byCategory,
-      monthlyData: last6Months.map((m) => ({
-        ...m,
-        pct: maxMonthly > 0 ? (m.amount / maxMonthly) * 100 : 0,
-      })),
-    };
+    return { totalSpent: spent, totalIncome: income, byCategory, trendData };
   }, [filteredTransactions, categories]);
+
+  // Compute donut data with percentages
+  const donutData = useMemo(() => {
+    const prepared = prepareChartData(byCategory);
+    return prepared.map((cat) => ({
+      name: cat.name,
+      pct: totalSpent > 0 ? Math.round((cat.amount / totalSpent) * 100) : 0,
+      amt: cat.amount,
+      color: getCatColor(cat.name),
+    }));
+  }, [byCategory, totalSpent]);
+
+  // Compute trend change %
+  const trendChange = useMemo(() => {
+    if (trendData.length < 2) return null;
+    const current = trendData[trendData.length - 1].value;
+    const prev = trendData[trendData.length - 2].value;
+    if (prev === 0) return null;
+    return ((current - prev) / prev * 100).toFixed(1);
+  }, [trendData]);
+
+  // Generate chart insights from data
+  const chartInsights = useMemo(() => {
+    const distribution = donutData.length > 0
+      ? { tone: 'amber', text: `${donutData[0].name} is your biggest category at ${donutData[0].pct}% (${currencySymbol}${donutData[0].amt.toFixed(0)}). ${donutData.length > 1 ? `${donutData[1].name} follows at ${donutData[1].pct}%.` : ''}` }
+      : null;
+
+    const trend = trendChange
+      ? { tone: Number(trendChange) > 0 ? 'rose' : 'aqua', text: `Spending ${Number(trendChange) > 0 ? 'climbed' : 'dropped'} ${Math.abs(Number(trendChange))}% compared to last month.` }
+      : null;
+
+    const topCat = byCategory[0];
+    const catObj = topCat ? categories.find((c) => c.name === topCat.name) : null;
+    const budget = catObj?.budget ?? 0;
+    const category = topCat && budget > 0
+      ? { tone: topCat.amount > budget ? 'rose' : 'aqua', text: `${topCat.name} is at ${currencySymbol}${topCat.amount.toFixed(0)} of ${currencySymbol}${budget.toFixed(0)} budget${topCat.amount > budget ? ' — over budget!' : '.'}` }
+      : null;
+
+    return { distribution, trend, category };
+  }, [donutData, trendChange, byCategory, categories, currencySymbol]);
 
   const periodChips: { key: PeriodOption; label: string }[] = [
     { key: 'week', label: 'This Week' },
@@ -389,618 +449,430 @@ export default function AnalyticsScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>Loading analytics...</Text>
-        </View>
-      </SafeAreaView>
+      <View style={s.loadingWrap}>
+        <Aurora width={SCREEN_WIDTH} height={SCREEN_HEIGHT} />
+        <ActivityIndicator size="large" color={t.auraAqua} />
+        <Text style={s.loadingText}>Loading insights...</Text>
+      </View>
     );
   }
 
-  const pieData = prepareChartData(byCategory);
-
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
+    <View style={s.root}>
+      <Aurora width={SCREEN_WIDTH} height={SCREEN_HEIGHT} />
       <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        style={s.scroll}
+        contentContainerStyle={s.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.title}>Analytics</Text>
-        <Text style={styles.subtitle}>Your financial insights</Text>
+        {/* Header */}
+        <Text style={s.title}>Insights</Text>
+        <Text style={s.subtitle}>How your money flows</Text>
 
-        {/* Time period filter */}
+        {/* Period chips */}
         <ScrollView
           horizontal
-          style={styles.chipsScroll}
-          contentContainerStyle={styles.chipsContent}
           showsHorizontalScrollIndicator={false}
+          style={s.chipsRow}
+          contentContainerStyle={{ gap: 8 }}
         >
-          {periodChips.map((chip) => {
-            const active = period === chip.key;
-            return (
-              <TouchableOpacity
-                key={chip.key}
-                style={[styles.chip, active && styles.chipActive]}
-                onPress={() => setPeriod(chip.key)}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>{chip.label}</Text>
-              </TouchableOpacity>
-            );
-          })}
+          {periodChips.map((chip) => (
+            <GChip
+              key={chip.key}
+              label={chip.label}
+              active={period === chip.key}
+              onPress={() => setPeriod(chip.key)}
+            />
+          ))}
         </ScrollView>
 
-        {/* Summary cards */}
-        <View style={styles.summaryRow}>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>Total Spent</Text>
-            <Text style={[styles.summaryAmount, styles.summarySpent]}>
-              {currencySymbol}{totalSpent.toFixed(2)}
-            </Text>
-          </View>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>
-              {monthlyIncome > 0 ? 'Monthly Income' : 'Total Saved'}
-            </Text>
-            <Text style={[styles.summaryAmount, styles.summarySaved]}>
-              {monthlyIncome > 0
-                ? `${currencySymbol}${(() => {
-                    if (period === 'week') return (monthlyIncome * 12 / 52).toFixed(2);
-                    if (period === '3months') return (monthlyIncome * 3).toFixed(2);
-                    if (period === 'year') return (monthlyIncome * 12).toFixed(2);
-                    return monthlyIncome.toFixed(2);
-                  })()}`
-                : `${currencySymbol}${totalSaved.toFixed(2)}`}
-            </Text>
-          </View>
+        {/* ── AI Insights (TOP) ── */}
+        <View style={s.insightsHeader}>
+          <Orb size={26} rings={false} />
+          <Text style={s.insightsTitle}>Finni noticed</Text>
+          <View style={{ flex: 1 }} />
+          {lastUpdated && (
+            <View style={s.updatedBadge}>
+              <View style={s.updatedDot} />
+              <Text style={s.updatedText}>Updated today</Text>
+            </View>
+          )}
         </View>
 
-        {/* Spending by Category — bar list */}
-        <Text style={styles.sectionTitle}>Spending by Category</Text>
-        <View style={styles.categorySection}>
-          {byCategory.length === 0 ? (
-            <>
-              {[1, 2, 3, 4].map((i) => (
-                <View key={i} style={styles.categoryPlaceholder}>
-                  <View style={styles.categoryPlaceholderLeft}>
-                    <Text style={styles.placeholderEmoji}>💰</Text>
-                    <Text style={styles.placeholderText}>Category {i}</Text>
+        {transactions.length < 10 ? (
+          <GlassCard style={s.insightCard}>
+            <Text style={[s.insightTitle, { color: t.auraAqua }]}>Building your insights...</Text>
+            <Text style={s.insightBody}>
+              Finni needs at least 10 transactions to generate personalized insights. You have {transactions.length} so far — keep logging!
+            </Text>
+          </GlassCard>
+        ) : insightsLoading && insights.length === 0 ? (
+          <GlassCard style={s.insightCard}>
+            <ActivityIndicator size="small" color={t.auraAqua} />
+            <Text style={[s.insightBody, { marginTop: 8 }]}>Analyzing your spending...</Text>
+          </GlassCard>
+        ) : (
+          <>
+            {insights.map((ins, i) => {
+              const insType = ins.type ?? 'tip';
+              const color = INSIGHT_TONE[insType] ?? t.auraAqua;
+              const title = ins.title || ins.summary || 'Insight';
+              const body = ins.description || ins.suggestion || ins.topCategory || '';
+              return (
+                <GlassCard key={i} style={s.insightCard}>
+                  <View style={s.insightStrip}>
+                    <View style={[s.insightStripBar, { backgroundColor: color }]} />
                   </View>
-                  <View style={styles.categoryRowMiddle}>
-                    <View style={styles.progressTrack}>
-                      <View style={[styles.progressFill, { width: '0%', backgroundColor: colors.border }]} />
+                  <View style={s.insightIconRow}>
+                    <View style={[s.insightIconBadge, { backgroundColor: color + '2E' }]}>
+                      <Orb size={17} rings={false} />
                     </View>
+                    <Text style={[s.insightTitle, { color }]}>{title}</Text>
                   </View>
-                  <Text style={styles.placeholderAmount}>{currencySymbol}0.00</Text>
+                  <Text style={s.insightBody}>{body}</Text>
+                  {insType === 'income_alert' && (
+                    <TouchableOpacity
+                      style={[s.insightCTA, { borderColor: color }]}
+                      onPress={() => navigation.navigate('Settings' as never)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[s.insightCTAText, { color }]}>Add income sources →</Text>
+                    </TouchableOpacity>
+                  )}
+                </GlassCard>
+              );
+            })}
+            {savingsRecs.map((rec, i) => (
+              <GlassCard key={`sav-${i}`} style={s.insightCard}>
+                <View style={s.insightStrip}>
+                  <View style={[s.insightStripBar, { backgroundColor: t.auraBlue }]} />
+                </View>
+                <View style={s.insightIconRow}>
+                  <View style={[s.insightIconBadge, { backgroundColor: t.auraBlue + '2E' }]}>
+                    <Orb size={17} rings={false} />
+                  </View>
+                  <Text style={[s.insightTitle, { color: t.auraBlue }]}>💰 {rec.title}</Text>
+                </View>
+                <Text style={s.insightBody}>{rec.description}</Text>
+                {rec.potentialSavings && (
+                  <Text style={s.potentialSavings}>{rec.potentialSavings}</Text>
+                )}
+              </GlassCard>
+            ))}
+          </>
+        )}
+
+        {/* Refresh / Customize row */}
+        {transactions.length >= 10 && (
+          <View style={s.actionRow}>
+            <TouchableOpacity
+              style={s.ghostBtn}
+              onPress={() => { setPromptDraft(userInsightPrompt); setShowPromptEditor((v) => !v); }}
+              activeOpacity={0.8}
+            >
+              <Text style={s.ghostBtnText}>✏️ Customize</Text>
+            </TouchableOpacity>
+            {showRefreshButton && (
+              <TouchableOpacity
+                style={[s.ghostBtn, (insightsLoading || refreshCooldown) && { opacity: 0.5 }]}
+                onPress={fetchAndCacheInsights}
+                disabled={insightsLoading || refreshCooldown}
+                activeOpacity={0.8}
+              >
+                {insightsLoading ? (
+                  <ActivityIndicator size="small" color={t.auraAqua} />
+                ) : (
+                  <Text style={s.ghostBtnText}>{refreshCooldown ? 'Wait 5 min' : '↻ Refresh'}</Text>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* Prompt editor */}
+        {showPromptEditor && (
+          <GlassCard style={s.promptCard}>
+            <Text style={s.promptLabel}>
+              Add custom instructions for your insights (e.g. "Focus on food spending")
+            </Text>
+            <TextInput
+              style={s.promptInput}
+              value={promptDraft}
+              onChangeText={(v) => setPromptDraft(v.slice(0, USER_PROMPT_MAX))}
+              placeholder="e.g. Focus on food and transport..."
+              placeholderTextColor={t.text3}
+              multiline
+              maxLength={USER_PROMPT_MAX}
+            />
+            <View style={s.promptActions}>
+              <Text style={s.promptCount}>{promptDraft.length}/{USER_PROMPT_MAX}</Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity onPress={() => setShowPromptEditor(false)} style={s.promptCancelBtn}>
+                  <Text style={s.promptCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={saveUserPrompt} style={s.promptSaveBtn}>
+                  <Text style={s.promptSaveText}>Save</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </GlassCard>
+        )}
+
+        {insightsError ? <Text style={s.errorText}>{insightsError}</Text> : null}
+
+        {/* ── Spending Distribution — glowing donut ── */}
+        {byCategory.length >= 2 && (
+          <GlassCard style={s.chartCard}>
+            <Text style={s.eyebrow}>Spending Distribution</Text>
+            <View style={s.donutWrap}>
+              <GlowDonut
+                data={donutData}
+                size={180}
+                centerLabel={`${currencySymbol}${totalSpent.toFixed(0)}`}
+                centerSub="this month"
+              />
+            </View>
+            {/* Legend */}
+            <View style={s.legendGrid}>
+              {donutData.map((c) => (
+                <View key={c.name} style={s.legendItem}>
+                  <View style={[s.legendDot, { backgroundColor: c.color }]} />
+                  <Text style={s.legendPct}>{c.pct}%</Text>
+                  <Text style={s.legendName} numberOfLines={1}>{c.name}</Text>
                 </View>
               ))}
-            </>
+            </View>
+            {chartInsights.distribution && (
+              <ChartInsight text={chartInsights.distribution.text} tone={chartInsights.distribution.tone} />
+            )}
+          </GlassCard>
+        )}
+
+        {/* ── Monthly Trend — area chart ── */}
+        <GlassCard style={s.chartCard}>
+          <View style={s.trendHeader}>
+            <Text style={s.eyebrow}>Monthly Trend</Text>
+            {trendChange && (
+              <Text style={[s.trendChange, { color: Number(trendChange) > 0 ? t.auraRose : t.auraAqua }]}>
+                {Number(trendChange) > 0 ? '↑' : '↓'} {Number(trendChange) > 0 ? '+' : ''}{trendChange}%
+              </Text>
+            )}
+          </View>
+          <TrendArea data={trendData} width={SCREEN_WIDTH - 84} height={110} />
+          {chartInsights.trend && (
+            <ChartInsight text={chartInsights.trend.text} tone={chartInsights.trend.tone} />
+          )}
+        </GlassCard>
+
+        {/* ── Totals ── */}
+        <View style={s.totalsRow}>
+          <GlassCard style={s.totalCard}>
+            <Text style={s.eyebrow}>Total Spent</Text>
+            <Text style={[s.totalValue, { color: t.auraRose }]}>
+              {currencySymbol}{totalSpent.toFixed(0)}
+            </Text>
+          </GlassCard>
+          <GlassCard style={s.totalCard}>
+            <Text style={s.eyebrow}>Income</Text>
+            <Text style={[s.totalValue, { color: t.auraAqua }]}>
+              {currencySymbol}{(monthlyIncome || totalIncome).toFixed(0)}
+            </Text>
+          </GlassCard>
+        </View>
+
+        {/* ── By Category ── */}
+        <Text style={s.sectionTitle}>By category</Text>
+        <GlassCard style={s.catListCard}>
+          {byCategory.length === 0 ? (
+            <Text style={s.emptyText}>No spending data yet for this period.</Text>
           ) : (
-            byCategory.map((cat) => {
+            byCategory.map((cat, i) => {
               const catObj = categories.find((c) => c.name === cat.name);
               const budget = catObj?.budget ?? 0;
               const hasBudget = budget > 0;
               const pct = hasBudget
                 ? Math.min(100, (cat.amount / budget) * 100)
                 : totalSpent > 0 ? (cat.amount / totalSpent) * 100 : 0;
-              const overBudget = hasBudget && cat.amount > budget;
-              const catColor = overBudget ? '#EF4444' : getCategoryColor(cat.name);
-              const emoji = catObj?.emoji ?? getCategoryEmoji(cat.name);
+              const color = getCatColor(cat.name);
               return (
-                <View key={cat.name} style={styles.categoryRow}>
-                  <View style={styles.categoryRowLeft}>
-                    <Text style={styles.categoryEmoji}>{emoji}</Text>
-                    <Text style={styles.categoryName}>{cat.name}</Text>
-                  </View>
-                  <View style={styles.categoryRowMiddle}>
-                    <View style={styles.progressTrack}>
-                      <View style={[styles.progressFill, { width: `${pct}%`, backgroundColor: catColor }]} />
+                <View
+                  key={cat.name}
+                  style={[
+                    s.catRow,
+                    i < byCategory.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.glassLine },
+                  ]}
+                >
+                  <CatIcon name={cat.name} size={36} radius={11} />
+                  <View style={s.catInfo}>
+                    <Text style={s.catName}>{cat.name}</Text>
+                    <View style={{ marginTop: 8 }}>
+                      <Bar pct={Math.min(100, pct * 2.2)} color={color} height={5} />
                     </View>
-                    {hasBudget && (
-                      <Text style={{ fontSize: 10, color: overBudget ? '#EF4444' : colors.textSecondary, marginTop: 2 }}>
-                        {overBudget ? '⚠ ' : ''}{currencySymbol}{cat.amount.toFixed(0)} / {currencySymbol}{budget.toFixed(0)}
-                      </Text>
-                    )}
                   </View>
-                  <Text style={[styles.categoryAmount, overBudget && { color: '#EF4444' }]}>
-                    {currencySymbol}{cat.amount.toFixed(2)}
-                  </Text>
+                  <Text style={s.catAmount}>{currencySymbol}{cat.amount.toFixed(0)}</Text>
                 </View>
               );
             })
           )}
-        </View>
+          {chartInsights.category && (
+            <ChartInsight text={chartInsights.category.text} tone={chartInsights.category.tone} />
+          )}
+        </GlassCard>
 
-        {/* Spending Distribution — pie chart */}
-        {byCategory.length >= 2 ? (
-          <>
-            <Text style={styles.sectionTitle}>Spending Distribution</Text>
-            <View style={styles.pieSection}>
-              <PieChart
-                data={pieData.map((cat, i) => ({
-                  name: cat.name.length > 13 ? cat.name.slice(0, 13) + '…' : cat.name,
-                  population: cat.amount,
-                  color: PIE_COLORS[i % PIE_COLORS.length],
-                  legendFontColor: '#94A3B8',
-                  legendFontSize: 11,
-                }))}
-                width={SCREEN_WIDTH - 40}
-                height={200}
-                chartConfig={{
-                  color: (opacity = 1) => `rgba(148, 163, 184, ${opacity})`,
-                }}
-                accessor="population"
-                backgroundColor="transparent"
-                paddingLeft="10"
-                absolute={false}
-              />
-            </View>
-          </>
-        ) : byCategory.length === 1 ? (
-          <>
-            <Text style={styles.sectionTitle}>Spending Distribution</Text>
-            <View style={styles.pieEmptyState}>
-              <Text style={styles.pieEmptyText}>
-                Add transactions in more categories to see the distribution chart
-              </Text>
-            </View>
-          </>
-        ) : null}
-
-        {/* Monthly Trend */}
-        <Text style={styles.sectionTitle}>Monthly Trend</Text>
-        <View style={styles.monthlySection}>
-          <View style={styles.chartRow}>
-            {monthlyData.map((m) => (
-              <View key={m.key} style={styles.barContainer}>
-                <View style={styles.barTrack}>
-                  <View
-                    style={[
-                      styles.barFill,
-                      {
-                        height: `${m.pct}%`,
-                        backgroundColor: m.pct > 0 ? colors.primary : colors.border,
-                      },
-                    ]}
-                  />
-                </View>
-                <Text style={styles.barLabel}>{m.label}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-
-        {/* AI Insights */}
-        {transactions.length < 10 ? (
-          <View style={[styles.aiInsightCard, { borderColor: colors.border }]}>
-            <Text style={[styles.aiInsightTitle, { color: colors.textSecondary }]}>📊 Insights</Text>
-            <Text style={styles.aiInsightSubtitle}>
-              Finni needs at least 10 transactions to generate personalized insights.{'\n\n'}
-              {transactions.length > 0
-                ? `You have ${transactions.length} so far — ${10 - transactions.length} more to go!`
-                : 'Start by logging your first expense in the chat.'}
-            </Text>
-          </View>
-        ) : (
-          <>
-            <View style={styles.aiInsightsHeader}>
-              <Text style={styles.sectionTitle}>AI Insights</Text>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity
-                  style={styles.refreshButton}
-                  onPress={() => { setPromptDraft(userInsightPrompt); setShowPromptEditor((v) => !v); }}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.refreshButtonText}>✏️ Customize</Text>
-                </TouchableOpacity>
-                {showRefreshButton && (
-                  <TouchableOpacity
-                    style={[styles.refreshButton, (insightsLoading || refreshCooldown) && { opacity: 0.5 }]}
-                    onPress={fetchAndCacheInsights}
-                    disabled={insightsLoading || refreshCooldown}
-                    activeOpacity={0.8}
-                  >
-                    {insightsLoading ? (
-                      <ActivityIndicator size="small" color="#6366F1" />
-                    ) : (
-                      <Text style={styles.refreshButtonText}>{refreshCooldown ? 'Wait 5 min' : 'Refresh'}</Text>
-                    )}
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-            {showPromptEditor && (
-              <View style={styles.promptEditor}>
-                <Text style={styles.promptEditorLabel}>
-                  Add custom instructions for your insights (e.g. "Focus on food spending" or "Be more encouraging")
-                </Text>
-                <TextInput
-                  style={styles.promptEditorInput}
-                  value={promptDraft}
-                  onChangeText={(t) => setPromptDraft(t.slice(0, USER_PROMPT_MAX))}
-                  placeholder="e.g. Focus on food and transport. Be very concise."
-                  placeholderTextColor={colors.textSecondary}
-                  multiline
-                  maxLength={USER_PROMPT_MAX}
-                />
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
-                  <Text style={styles.promptCharCount}>{promptDraft.length}/{USER_PROMPT_MAX}</Text>
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    <TouchableOpacity onPress={() => setShowPromptEditor(false)} style={styles.promptCancelBtn}>
-                      <Text style={styles.promptCancelText}>Cancel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={saveUserPrompt} style={styles.promptSaveBtn}>
-                      <Text style={styles.promptSaveText}>Save</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </View>
-            )}
-            {lastUpdated && (
-              <Text style={styles.lastUpdatedText}>{formatLastUpdated(lastUpdated)}</Text>
-            )}
-            {insightsError ? (
-              <Text style={styles.insightsError}>{insightsError}</Text>
-            ) : null}
-            <View style={styles.aiInsightsSection}>
-              {insightsLoading && insights.length === 0 ? (
-                <View style={styles.aiInsightCard}>
-                  <ActivityIndicator size="small" color={colors.primary} />
-                  <Text style={[styles.aiInsightSubtitle, { marginTop: 8 }]}>
-                    Analyzing your spending...
-                  </Text>
-                </View>
-              ) : (
-                <>
-                  {insights.map((insight, i) => {
-                    const insightType = insight.type ?? 'tip';
-                    const typeConfig = INSIGHT_TYPE_CONFIG[insightType] ?? INSIGHT_TYPE_CONFIG.tip;
-                    const title = insight.title || insight.summary || 'Insight';
-                    const description = insight.description || insight.suggestion || insight.topCategory || '—';
-                    return (
-                      <View
-                        key={i}
-                        style={[styles.aiInsightCard, { borderColor: typeConfig.color }]}
-                      >
-                        <Text style={[styles.aiInsightTitle, { color: typeConfig.color }]}>
-                          {typeConfig.icon} {title}
-                        </Text>
-                        <Text style={styles.aiInsightSubtitle}>{description}</Text>
-                        {insightType === 'income_alert' && (
-                          <TouchableOpacity
-                            style={[styles.insightCTA, { borderColor: typeConfig.color }]}
-                            onPress={() => navigation.navigate('Settings' as never)}
-                            activeOpacity={0.8}
-                          >
-                            <Text style={[styles.insightCTAText, { color: typeConfig.color }]}>
-                              💡 Add income sources →
-                            </Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    );
-                  })}
-                  {savingsRecs.map((rec, i) => (
-                    <View key={`savings-${i}`} style={[styles.aiInsightCard, { borderColor: '#3B82F6' }]}>
-                      <Text style={[styles.aiInsightTitle, { color: '#3B82F6' }]}>💰 {rec.title}</Text>
-                      <Text style={styles.aiInsightSubtitle}>{rec.description}</Text>
-                      {rec.potentialSavings && (
-                        <Text style={styles.potentialSavings}>{rec.potentialSavings}</Text>
-                      )}
-                    </View>
-                  ))}
-                  {!insightsLoading && insights.length === 0 && savingsRecs.length === 0 && (
-                    <View style={styles.aiInsightCard}>
-                      <Text style={styles.aiInsightTitle}>📊 Insights</Text>
-                      <Text style={styles.aiInsightSubtitle}>
-                        Add more transactions to get personalized insights.
-                      </Text>
-                    </View>
-                  )}
-                </>
-              )}
-            </View>
-            <Text style={styles.insightsFootnote}>
-              AI-generated insights are for informational purposes only and do not constitute financial advice.
-            </Text>
-          </>
-        )}
+        {/* Footer */}
+        <Text style={s.footnote}>
+          AI-generated insights are for informational purposes only and do not constitute financial advice.
+        </Text>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
+// ══════════════ STYLES ══════════════
+const s = StyleSheet.create({
+  root: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: t.auraBg,
   },
-  loadingContainer: {
+  loadingWrap: {
     flex: 1,
+    backgroundColor: t.auraBg,
     justifyContent: 'center',
     alignItems: 'center',
     gap: 16,
   },
   loadingText: {
     fontSize: 14,
-    color: colors.textSecondary,
+    fontFamily: fonts.medium,
+    color: t.text3,
   },
-  scrollView: {
+  scroll: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 32,
+    paddingTop: 62,
+    paddingHorizontal: 22,
+    paddingBottom: 120,
   },
   title: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: colors.textPrimary,
-    marginBottom: 4,
+    fontSize: 30,
+    fontFamily: fonts.extraBold,
+    fontWeight: '800',
+    color: t.text,
+    letterSpacing: -0.6,
   },
   subtitle: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginBottom: 20,
+    fontSize: 15,
+    fontFamily: fonts.regular,
+    color: t.text2,
+    marginTop: 4,
+    lineHeight: 23,
   },
-  chipsScroll: {
+  chipsRow: {
+    marginTop: 18,
     maxHeight: 44,
-    marginBottom: 20,
   },
-  chipsContent: {
-    flexDirection: 'row',
-    paddingVertical: 4,
-    gap: 8,
-  },
+
+  // ── Chips ──
   chip: {
-    backgroundColor: colors.cardBackground,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 999,
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
     paddingVertical: 10,
+    borderRadius: t.rPill,
+    backgroundColor: t.glass,
+    borderWidth: 1,
+    borderColor: t.glassLine,
   },
   chipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    backgroundColor: t.auraIndigo,
+    borderColor: 'transparent',
   },
   chipText: {
     fontSize: 14,
+    fontFamily: fonts.semiBold,
     fontWeight: '600',
-    color: colors.textSecondary,
+    color: t.text2,
   },
   chipTextActive: {
-    color: colors.textPrimary,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 24,
-  },
-  summaryCard: {
-    flex: 1,
-    backgroundColor: colors.cardBackground,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 16,
-  },
-  summaryLabel: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginBottom: 4,
-  },
-  summaryAmount: {
-    fontSize: 20,
+    color: '#fff',
     fontWeight: '700',
   },
-  summarySpent: {
-    color: colors.error,
-  },
-  summarySaved: {
-    color: colors.success,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.textPrimary,
+
+  // ── Insights section ──
+  insightsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    marginTop: 22,
     marginBottom: 12,
   },
-  categorySection: {
-    backgroundColor: colors.cardBackground,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 24,
-  },
-  categoryPlaceholder: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  categoryPlaceholderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: 100,
-    gap: 8,
-  },
-  placeholderEmoji: {
-    fontSize: 20,
-  },
-  placeholderText: {
-    fontSize: 14,
-    color: colors.textSecondary,
-  },
-  categoryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  categoryRowLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: 100,
-    gap: 8,
-  },
-  categoryEmoji: {
-    fontSize: 20,
-  },
-  categoryName: {
-    fontSize: 14,
+  insightsTitle: {
+    fontSize: 17,
+    fontFamily: fonts.semiBold,
     fontWeight: '600',
-    color: colors.textPrimary,
+    color: t.text,
+    letterSpacing: -0.3,
   },
-  categoryRowMiddle: {
-    flex: 1,
-    marginHorizontal: 12,
-  },
-  progressTrack: {
-    height: 8,
-    backgroundColor: colors.border,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  categoryAmount: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    width: 60,
-    textAlign: 'right',
-  },
-  placeholderAmount: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    width: 60,
-    textAlign: 'right',
-  },
-  pieSection: {
-    backgroundColor: colors.cardBackground,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    overflow: 'hidden',
-    paddingVertical: 8,
-    marginBottom: 24,
-  },
-  pieEmptyState: {
-    backgroundColor: colors.cardBackground,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 28,
+  updatedBadge: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
+    gap: 5,
   },
-  pieEmptyText: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 20,
+  updatedDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 99,
+    backgroundColor: t.green,
   },
-  monthlySection: {
-    backgroundColor: colors.cardBackground,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
+  updatedText: {
+    fontSize: 11.5,
+    fontFamily: fonts.semiBold,
+    fontWeight: '600',
+    color: t.text3,
+  },
+
+  // ── Insight cards ──
+  insightCard: {
     padding: 16,
-    marginBottom: 24,
-  },
-  chartRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    height: 120,
-  },
-  barContainer: {
-    flex: 1,
-    alignItems: 'center',
-    marginHorizontal: 4,
-  },
-  barTrack: {
-    flex: 1,
-    width: '100%',
-    maxWidth: 36,
-    backgroundColor: colors.border,
-    borderRadius: 6,
+    marginBottom: 12,
     overflow: 'hidden',
-    justifyContent: 'flex-end',
-    marginBottom: 8,
   },
-  barFill: {
-    width: '100%',
-    minHeight: 4,
-    borderRadius: 6,
+  insightStrip: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    width: 3,
   },
-  barLabel: {
-    fontSize: 11,
-    color: colors.textSecondary,
+  insightStripBar: {
+    flex: 1,
+    width: 3,
   },
-  aiInsightsHeader: {
+  insightIconRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 4,
+    gap: 10,
+    marginBottom: 8,
   },
-  refreshButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: 'rgba(99, 102, 241, 0.2)',
-    borderWidth: 1,
-    borderColor: '#6366F1',
-    minWidth: 80,
+  insightIconBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  refreshButtonText: {
-    fontSize: 13,
+  insightTitle: {
+    fontSize: 15.5,
+    fontFamily: fonts.semiBold,
     fontWeight: '600',
-    color: '#6366F1',
   },
-  lastUpdatedText: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginBottom: 8,
-  },
-  insightsError: {
-    fontSize: 13,
-    color: colors.error,
-    marginBottom: 10,
-  },
-  aiInsightsSection: {
-    gap: 12,
-  },
-  potentialSavings: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.success,
-    marginTop: 4,
-  },
-  aiInsightCard: {
-    backgroundColor: '#1a1f3a',
-    borderWidth: 1,
-    borderColor: '#6366F1',
-    borderRadius: 12,
-    padding: 16,
-  },
-  aiInsightTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.textPrimary,
-    marginBottom: 4,
-  },
-  aiInsightSubtitle: {
+  insightBody: {
     fontSize: 14,
-    color: colors.textSecondary,
-    marginBottom: 8,
+    fontFamily: fonts.regular,
+    color: t.text2,
+    lineHeight: 21.5,
   },
   insightCTA: {
-    marginTop: 6,
+    marginTop: 8,
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderWidth: 1,
@@ -1009,65 +881,274 @@ const styles = StyleSheet.create({
   },
   insightCTAText: {
     fontSize: 13,
+    fontFamily: fonts.semiBold,
     fontWeight: '600',
   },
-  promptEditor: {
-    backgroundColor: colors.cardBackground,
+  potentialSavings: {
+    fontSize: 13,
+    fontFamily: fonts.semiBold,
+    fontWeight: '600',
+    color: t.green,
+    marginTop: 4,
+  },
+
+  // ── Action row ──
+  actionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  ghostBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: t.rSm,
+    backgroundColor: t.glass,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
+    borderColor: t.glassLine,
+  },
+  ghostBtnText: {
+    fontSize: 13,
+    fontFamily: fonts.semiBold,
+    fontWeight: '600',
+    color: t.text2,
+  },
+
+  // ── Prompt editor ──
+  promptCard: {
     padding: 14,
     marginBottom: 12,
   },
-  promptEditorLabel: {
+  promptLabel: {
     fontSize: 12,
-    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    color: t.text3,
     marginBottom: 8,
     lineHeight: 18,
   },
-  promptEditorInput: {
-    backgroundColor: colors.background,
+  promptInput: {
+    backgroundColor: t.glass,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
+    borderColor: t.glassLine,
+    borderRadius: t.rSm,
     padding: 10,
     fontSize: 14,
-    color: colors.textPrimary,
+    fontFamily: fonts.regular,
+    color: t.text,
     minHeight: 72,
     textAlignVertical: 'top',
   },
-  promptCharCount: {
+  promptActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  promptCount: {
     fontSize: 11,
-    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    color: t.text3,
   },
   promptCancelBtn: {
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: t.glassLine,
   },
   promptCancelText: {
     fontSize: 13,
+    fontFamily: fonts.semiBold,
     fontWeight: '600',
-    color: colors.textSecondary,
+    color: t.text2,
   },
   promptSaveBtn: {
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 8,
-    backgroundColor: colors.primary,
+    backgroundColor: t.auraIndigo,
   },
   promptSaveText: {
     fontSize: 13,
+    fontFamily: fonts.semiBold,
     fontWeight: '600',
-    color: colors.textPrimary,
+    color: '#fff',
   },
-  insightsFootnote: {
-    fontSize: 10,
-    color: '#374151',
+  errorText: {
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    color: t.red,
+    marginBottom: 10,
+  },
+
+  // ── Chart cards ──
+  chartCard: {
+    padding: 22,
+    marginTop: 16,
+  },
+  eyebrow: {
+    fontSize: 11,
+    fontFamily: fonts.semiBold,
+    fontWeight: '600',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    color: t.text3,
+  },
+  donutWrap: {
+    alignItems: 'center',
+    marginVertical: 18,
+  },
+  legendGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 11,
+    marginTop: 14,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    width: '46%',
+  },
+  legendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 4,
+  },
+  legendPct: {
+    fontSize: 13,
+    fontFamily: fonts.bold,
+    fontWeight: '700',
+    color: t.text,
+  },
+  legendName: {
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: t.text2,
+    flex: 1,
+  },
+
+  // ── Trend ──
+  trendHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+  },
+  trendChange: {
+    fontSize: 13,
+    fontFamily: fonts.bold,
+    fontWeight: '700',
+  },
+
+  // ── Totals ──
+  totalsRow: {
+    flexDirection: 'row',
+    gap: 14,
+    marginTop: 16,
+  },
+  totalCard: {
+    flex: 1,
+    padding: 18,
+  },
+  totalValue: {
+    fontSize: 22,
+    fontFamily: fonts.extraBold,
+    fontWeight: '800',
+    marginTop: 9,
+  },
+
+  // ── Category list ──
+  sectionTitle: {
+    fontSize: 17,
+    fontFamily: fonts.semiBold,
+    fontWeight: '600',
+    color: t.text,
+    marginTop: 26,
+    marginBottom: 12,
+    letterSpacing: -0.3,
+  },
+  catListCard: {
+    paddingHorizontal: 18,
+    paddingTop: 6,
+    paddingBottom: 18,
+  },
+  catRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 13,
+    paddingVertical: 13,
+  },
+  catInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  catName: {
+    fontSize: 14.5,
+    fontFamily: fonts.semiBold,
+    fontWeight: '600',
+    color: t.text,
+  },
+  catAmount: {
+    fontSize: 14.5,
+    fontFamily: fonts.bold,
+    fontWeight: '700',
+    color: t.text,
+  },
+  emptyText: {
+    fontSize: 14,
+    fontFamily: fonts.regular,
+    color: t.text3,
     textAlign: 'center',
-    marginTop: 12,
+    paddingVertical: 20,
+  },
+
+  // ── Bar ──
+  barTrack: {
+    borderRadius: 99,
+    backgroundColor: t.surface3,
+    overflow: 'hidden',
+  },
+  barFill: {
+    borderRadius: 99,
+  },
+
+  // ── Chart insight ──
+  chartInsight: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 16,
+    paddingTop: 15,
+    borderTopWidth: 1,
+    borderTopColor: t.glassLine,
+  },
+  chartInsightBadge: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chartInsightLabel: {
+    fontSize: 10.5,
+    fontFamily: fonts.bold,
+    fontWeight: '700',
+    letterSpacing: 1.3,
+    textTransform: 'uppercase',
+    marginBottom: 3,
+  },
+  chartInsightText: {
+    fontSize: 13.5,
+    fontFamily: fonts.regular,
+    color: t.text2,
+    lineHeight: 20,
+  },
+
+  // ── Footer ──
+  footnote: {
+    fontSize: 10,
+    fontFamily: fonts.regular,
+    color: t.text4,
+    textAlign: 'center',
+    marginTop: 16,
     paddingHorizontal: 8,
     lineHeight: 14,
   },

@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { supabase } from './supabase';
+import { supabase, supabaseUrl } from './supabase';
 import { captureError } from './sentry';
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
@@ -30,12 +30,32 @@ function resolveCategoryFuzzy(
   return best && best.score >= 0.7 ? best.id : null;
 }
 
-const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+// Legacy client-side key — used as fallback during migration, removed in Phase 3
+const GEMINI_API_KEY_LEGACY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
 const GEMINI_MODEL = 'gemini-2.5-flash-lite';
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+const GEMINI_PROXY_URL = supabaseUrl ? `${supabaseUrl}/functions/v1/gemini-proxy` : null;
+const GEMINI_DIRECT_URL = GEMINI_API_KEY_LEGACY
+  ? `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY_LEGACY}`
+  : null;
 
-if (!GEMINI_API_KEY) {
-  console.error('[Agent] EXPO_PUBLIC_GEMINI_API_KEY is not configured. All AI features will fail.');
+if (!GEMINI_PROXY_URL && !GEMINI_API_KEY_LEGACY) {
+  console.error('[Agent] No Gemini proxy or API key configured. All AI features will fail.');
+}
+
+async function getAuthToken(): Promise<string | null> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Returns true if the error is an infrastructure error (not a Gemini API error) */
+function isInfraError(status: number): boolean {
+  // 4xx/5xx from Gemini itself (400, 403, 429, 503) should NOT trigger fallback
+  // Only edge function infra errors (502 Bad Gateway, 504 Timeout from proxy, or network failures) should
+  return status === 502 || status === 504 || status === 0;
 }
 
 function getYearWeekKey(): string {
@@ -57,32 +77,74 @@ async function callGeminiWithHistory(
   contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }>,
   retryCount = 0
 ): Promise<string> {
-  if (!GEMINI_API_KEY) throw new Error('Gemini API key is not configured');
+  if (!GEMINI_PROXY_URL && !GEMINI_DIRECT_URL) throw new Error('Gemini is not configured');
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
   try {
-    const res = await fetch(GEMINI_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents,
-        generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
-      }),
-      signal: controller.signal,
-    });
+    // Try edge function proxy first, fall back to direct if infra fails
+    const token = await getAuthToken();
+    const useProxy = !!(GEMINI_PROXY_URL && token);
+    const url = useProxy ? GEMINI_PROXY_URL! : GEMINI_DIRECT_URL!;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (useProxy) headers['Authorization'] = `Bearer ${token}`;
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          contents,
+          generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
+        }),
+        signal: controller.signal,
+      });
+    } catch (fetchErr) {
+      // Network error reaching proxy — fall back to direct if available
+      if (useProxy && GEMINI_DIRECT_URL) {
+        if (__DEV__) console.log('[Agent1] Proxy network error, falling back to direct');
+        res = await fetch(GEMINI_DIRECT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents,
+            generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
+          }),
+          signal: controller.signal,
+        });
+      } else {
+        throw fetchErr;
+      }
+    }
+
     clearTimeout(timeoutId);
-    console.log('[Agent1] Gemini response status:', res.status);
+    if (__DEV__) console.log('[Agent1] Gemini response status:', res.status);
+
+    // If proxy returned infra error, retry via direct
+    if (useProxy && isInfraError(res.status) && GEMINI_DIRECT_URL) {
+      if (__DEV__) console.log(`[Agent1] Proxy infra error (${res.status}), falling back to direct`);
+      const directRes = await fetch(GEMINI_DIRECT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents,
+          generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
+        }),
+      });
+      res = directRes;
+    }
+
     if (!res.ok) {
       const status = res.status;
       if ((status === 503 || status === 429) && retryCount < 3) {
         const delay = RETRY_DELAYS[retryCount];
-        console.log(`[Gemini] ${status} error, retrying in ${delay}ms (attempt ${retryCount + 1}/3)`);
+        if (__DEV__) console.log(`[Gemini] ${status} error, retrying in ${delay}ms (attempt ${retryCount + 1}/3)`);
         await new Promise((r) => setTimeout(r, delay));
         return callGeminiWithHistory(contents, retryCount + 1);
       }
       const errBody = await res.json().catch(() => ({}));
       const errMsg = (errBody as any)?.error?.message ?? '';
-      console.error(`[Gemini] ${status} error body:`, JSON.stringify(errBody));
+      if (__DEV__) console.error(`[Gemini] ${status} error body:`, JSON.stringify(errBody));
       if (status === 503) throw new Error('Gemini is experiencing high demand. Please try again in a moment.');
       if (status === 429) throw new Error('Rate limit reached. Please wait a moment before trying again.');
       if (status === 403) throw new Error(`Gemini API key error (403): ${errMsg || 'Check API key permissions and billing in Google Cloud Console'}`);
@@ -90,12 +152,12 @@ async function callGeminiWithHistory(
       throw new Error(`Gemini API error: ${status} - ${errMsg}`);
     }
     const data = await res.json();
-    console.log('[Agent1] Gemini data:', JSON.stringify(data).slice(0, 200));
+    if (__DEV__) console.log('[Agent1] Gemini data:', JSON.stringify(data).slice(0, 200));
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) {
       if (retryCount < 2) {
         const delay = RETRY_DELAYS[retryCount];
-        console.log(`[Gemini] Empty response, retrying in ${delay}ms (attempt ${retryCount + 1}/2)`);
+        if (__DEV__) console.log(`[Gemini] Empty response, retrying in ${delay}ms (attempt ${retryCount + 1}/2)`);
         await new Promise((r) => setTimeout(r, delay));
         return callGeminiWithHistory(contents, retryCount + 1);
       }
@@ -166,8 +228,8 @@ export async function getDailyInsights(
   transactions: { withdrawal?: number; deposit?: number; description: string | null; category: string | null; date: string; type?: string }[],
   userPrompt?: string
 ): Promise<DailyInsight[]> {
-  console.log('[Agent2] Running insights for user:', userId);
-  console.log('[Agent2] Transactions found:', transactions?.length);
+  if (__DEV__) console.log('[Agent2] Running insights for user:', userId);
+  if (__DEV__) console.log('[Agent2] Transactions found:', transactions?.length);
 
   const _now = new Date();
   const _localDate = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`;
@@ -339,8 +401,8 @@ export async function getWeeklySavingsRecommendations(
   userId: string,
   transactions: { withdrawal?: number; deposit?: number; description: string | null; category: string | null; date: string; type?: string }[]
 ): Promise<SavingsRecommendation[]> {
-  console.log('[Agent3] Running savings agent');
-  console.log('[Agent3] Transactions:', transactions?.length);
+  if (__DEV__) console.log('[Agent3] Running savings agent');
+  if (__DEV__) console.log('[Agent3] Transactions:', transactions?.length);
 
   const weekKey = `savings_${userId}_${getYearWeekKey()}`;
   const cached = await AsyncStorage.getItem(weekKey);
@@ -441,6 +503,7 @@ const NEW_CATEGORY_REGEX = /NEW_CATEGORY:\s*(\{[\s\S]*?\})(?:\s|$)/;
 const GOAL_UPDATE_REGEX = /GOAL_UPDATE:\s*(\{[\s\S]*?\})(?:\s|$)/;
 const GOAL_CREATE_REGEX = /GOAL_CREATE:\s*(\{[\s\S]*?\})(?:\s|$)/;
 const CATEGORY_BUDGET_REGEX = /CATEGORY_BUDGET:\s*(\{[\s\S]*?\})(?:\s|$)/;
+const INVESTMENT_DATA_REGEX = /INVESTMENT_DATA:\s*(\{[\s\S]*?\})(?:\s|$)/;
 const STANDALONE_CATEGORY_CREATE_REGEX = /✅ Created '([^']+)' category/i;
 
 const CATEGORY_EMOJI_MAP: Record<string, string> = {
@@ -471,6 +534,7 @@ function extractTransactionData(text: string): {
   goalUpdate: { goal_name: string; amount: number } | null;
   goalCreate: { name: string; target_amount: number; goal_type: string } | null;
   categoryBudgetUpdate: { category_name: string; budget: number } | null;
+  investmentData: { name: string; ticker?: string; asset_type: string; quantity: number; buy_price: number; action: 'buy' | 'sell' } | null;
   txParseError: boolean;
 } {
   const txMatch = text.match(TRANSACTION_DATA_REGEX);
@@ -543,7 +607,28 @@ function extractTransactionData(text: string): {
     response = response.replace(CATEGORY_BUDGET_REGEX, '').trim();
   }
 
-  return { response, txData, newCategory, goalUpdate, goalCreate, categoryBudgetUpdate, txParseError };
+  const investmentMatch = text.match(INVESTMENT_DATA_REGEX);
+  let investmentData: { name: string; ticker?: string; asset_type: string; quantity: number; buy_price: number; action: 'buy' | 'sell' } | null = null;
+  if (investmentMatch) {
+    try {
+      const parsed = JSON.parse(investmentMatch[1]);
+      if (typeof parsed.name === 'string' && typeof parsed.quantity === 'number' && typeof parsed.buy_price === 'number') {
+        investmentData = {
+          name: parsed.name,
+          ticker: parsed.ticker ?? null,
+          asset_type: parsed.asset_type ?? 'stock',
+          quantity: parsed.quantity,
+          buy_price: parsed.buy_price,
+          action: parsed.action ?? 'buy',
+        };
+      }
+    } catch (e) {
+      if (__DEV__) console.error('[Agent] Failed to parse INVESTMENT_DATA JSON:', e);
+    }
+    response = response.replace(INVESTMENT_DATA_REGEX, '').trim();
+  }
+
+  return { response, txData, newCategory, goalUpdate, goalCreate, categoryBudgetUpdate, investmentData, txParseError };
 }
 
 export async function chatAgent(
@@ -553,9 +638,11 @@ export async function chatAgent(
   context?: ChatAgentContext,
   sessionDate?: string
 ): Promise<ChatAgentResult> {
-  console.log('[Agent1] API Key configured:', !!GEMINI_API_KEY);
-  console.log('[Agent1] User ID:', userId);
-  console.log('[Agent1] Message:', userMessage);
+  if (__DEV__) {
+    console.log('[Agent1] Proxy configured:', !!GEMINI_PROXY_URL, 'Legacy key:', !!GEMINI_API_KEY_LEGACY);
+    console.log('[Agent1] User ID:', userId);
+    console.log('[Agent1] Message:', userMessage);
+  }
 
   const profile = context?.profile ?? null;
   const categories = context?.categories ?? [];
@@ -602,6 +689,18 @@ export async function chatAgent(
     ? `Here is the user's transaction history for the last 90 days:\n${JSON.stringify(transactions, null, 2)}`
     : `The user has no recorded transactions yet.`;
 
+  // Fetch investment portfolio for context
+  const { data: investmentsData } = await supabase
+    .from('investments')
+    .select('name, ticker, asset_type, quantity, buy_price, current_value')
+    .eq('user_id', userId);
+
+  const investmentContext = investmentsData?.length
+    ? `Here is the user's investment portfolio:\n${JSON.stringify(investmentsData, null, 2)}`
+    : `The user has no recorded investments yet.`;
+
+  const totalPortfolioValue = (investmentsData ?? []).reduce((sum, inv) => sum + (Number(inv.quantity) * Number(inv.current_value)), 0);
+
   const systemPrompt = `You are Finni, a smart AI personal finance coach.
 You have access to the user's real financial data.
 
@@ -617,6 +716,9 @@ Categories: ${JSON.stringify(categories?.map((c) => ({ id: c.id, name: c.name, e
 Goals: ${JSON.stringify(goals?.map((g) => ({ name: g.name, target: g.target_amount, current: g.current_amount })))}
 
 ${transactionContext}
+
+${investmentContext}
+${totalPortfolioValue > 0 ? `Total portfolio value: ${(profile?.currency || 'USD')} ${totalPortfolioValue.toFixed(2)}` : ''}
 
 UNINTELLIGIBLE INPUT:
 If the input is gibberish, random characters, or cannot be interpreted as a financial transaction or question, respond with:
@@ -712,6 +814,24 @@ If the user is explicitly saving toward or contributing to a named goal (e.g., "
 - Log the transaction normally with TRANSACTION_DATA
 - Also emit on its own line BEFORE TRANSACTION_DATA: GOAL_UPDATE:{"goal_name": "exact goal name from Goals list", "amount": <number>}
 
+INVESTMENT TRACKING:
+If the user mentions buying, investing in, or adding stocks, crypto, mutual funds, gold, or any investment asset:
+- Parse: name, ticker (if known), quantity, buy price per unit, and asset type
+- asset_type must be one of: stock, crypto, mutual_fund, gold, other
+- Respond with confirmation, then emit on its own line:
+  INVESTMENT_DATA:{"name": "Asset Name", "ticker": "TICK", "asset_type": "stock", "quantity": 10, "buy_price": 450, "action": "buy"}
+If the user mentions selling an investment:
+  INVESTMENT_DATA:{"name": "Asset Name", "ticker": "TICK", "asset_type": "stock", "quantity": 5, "buy_price": 280, "action": "sell"}
+Examples:
+- "bought 10 shares of Grameenphone at 450" → stock, qty 10, price 450, action buy
+- "added 0.5 BTC at 95000" → crypto, qty 0.5, price 95000, action buy
+- "invested 50000 in IDLC Growth Fund" → mutual_fund, qty 1, price 50000, action buy
+- "sold 5 shares of Square Pharma at 280" → stock, qty 5, price 280, action sell
+- "bought 2 grams of gold at 9500" → gold, qty 2, price 9500, action buy
+Do NOT emit TRANSACTION_DATA for investments. Use INVESTMENT_DATA only.
+Do NOT confuse regular expenses with investments. "Bought groceries" = expense. "Bought shares" = investment.
+If the user asks about their portfolio, use the investment data above to answer directly.
+
 CRITICAL RULES — YOU MUST FOLLOW THESE EXACTLY:
 1. Every time you log a transaction, your response MUST end with TRANSACTION_DATA on its own line.
 2. Format: TRANSACTION_DATA:{"amount": number, "description": "string", "category_id": "CategoryName", "type": "expense"|"income"}
@@ -737,7 +857,7 @@ Current user message: ${userMessage}`;
 
   try {
     const text = await callGeminiWithHistory(contents);
-    let { response, txData, newCategory, goalUpdate, goalCreate, categoryBudgetUpdate, txParseError } = extractTransactionData(text);
+    let { response, txData, newCategory, goalUpdate, goalCreate, categoryBudgetUpdate, investmentData, txParseError } = extractTransactionData(text);
 
     if (txParseError) {
       return {
@@ -753,7 +873,7 @@ Current user message: ${userMessage}`;
         const parsedAmount = parseFloat(loggedMatch[1]);
         const parsedCategory = loggedMatch[2].trim().replace(/['"]/g, '');
         if (!isNaN(parsedAmount) && parsedAmount > 0) {
-          console.log(`[Agent1] Fallback parse: amount=${parsedAmount}, category="${parsedCategory}"`);
+          if (__DEV__) console.log(`[Agent1] Fallback parse: amount=${parsedAmount}, category="${parsedCategory}"`);
           txData = {
             amount: parsedAmount,
             description: userMessage,
@@ -820,7 +940,7 @@ Current user message: ${userMessage}`;
           };
         }
 
-        console.log('[Agent1] Standalone category created:', catName);
+        if (__DEV__) console.log('[Agent1] Standalone category created:', catName);
         return { response: finalResponse, transaction: null };
       }
     }
@@ -841,7 +961,7 @@ Current user message: ${userMessage}`;
         .single();
 
       if (!catError && newCat) {
-        console.log('[Agent1] New category created:', newCat.id);
+        if (__DEV__) console.log('[Agent1] New category created:', newCat.id);
         // Update txData to use the new category's real ID
         if (txData && txData.category_id === 'NEW') {
           txData.category_id = newCat.id;
@@ -898,14 +1018,14 @@ Current user message: ${userMessage}`;
           const THRESHOLD = 0.7;
 
           if (bestMatch && bestMatch.score >= THRESHOLD) {
-            console.log(`[Agent1] Category matched: "${bestMatch.name}" (score: ${bestMatch.score.toFixed(2)})`);
+            if (__DEV__) console.log(`[Agent1] Category matched: "${bestMatch.name}" (score: ${bestMatch.score.toFixed(2)})`);
             categoryId = bestMatch.id;
             matchingScore = bestMatch.score;
           } else {
             // Score below threshold — auto-create a new category with a smart emoji
             const newCatName = typeof txData.category_id === 'string' ? txData.category_id : categoryId;
             const autoEmoji = CATEGORY_EMOJI_MAP[newCatName.toLowerCase()] ?? '📦';
-            console.log(`[Agent1] No match above threshold (best: ${bestMatch?.score?.toFixed(2) ?? 'n/a'}), creating category: "${newCatName}" ${autoEmoji}`);
+            if (__DEV__) console.log(`[Agent1] No match above threshold (best: ${bestMatch?.score?.toFixed(2) ?? 'n/a'}), creating category: "${newCatName}" ${autoEmoji}`);
 
             // Pre-check prevents duplicate categories from concurrent requests
             const { data: existingByName } = await supabase
@@ -968,8 +1088,10 @@ Current user message: ${userMessage}`;
       if (categoryId) insertData.category_id = categoryId;
 
       const { data: insertedRow, error } = await supabase.from('transactions').insert(insertData).select();
-      console.log('[Agent1] Insert result data:', JSON.stringify(insertedRow));
-      console.log('[Agent1] Insert result error:', JSON.stringify(error));
+      if (__DEV__) {
+        console.log('[Agent1] Insert result data:', JSON.stringify(insertedRow));
+        console.log('[Agent1] Insert result error:', JSON.stringify(error));
+      }
       if (error) {
         console.error('[Agent1] Insert error:', error);
         return {
@@ -999,10 +1121,10 @@ Current user message: ${userMessage}`;
           if (goalError) {
             console.error('[Agent1] Goal update error:', goalError);
           } else {
-            console.log(`[Agent1] Goal "${goal.name}" updated: ${goal.current_amount} → ${newAmount}`);
+            if (__DEV__) console.log(`[Agent1] Goal "${goal.name}" updated: ${goal.current_amount} → ${newAmount}`);
           }
         } else {
-          console.warn('[Agent1] GOAL_UPDATE: no matching goal found for name:', goalUpdate.goal_name);
+          if (__DEV__) console.warn('[Agent1] GOAL_UPDATE: no matching goal found for name:', goalUpdate.goal_name);
         }
       }
 
@@ -1028,7 +1150,7 @@ Current user message: ${userMessage}`;
         if (m) {
           const parsedTarget = parseFloat(m[2].replace(/,/g, ''));
           if (m[1] && !isNaN(parsedTarget) && parsedTarget > 0) {
-            console.log(`[Agent1] Fallback GOAL_CREATE: name="${m[1].trim()}", target=${parsedTarget}`);
+            if (__DEV__) console.log(`[Agent1] Fallback GOAL_CREATE: name="${m[1].trim()}", target=${parsedTarget}`);
             goalCreate = { name: m[1].trim(), target_amount: parsedTarget, goal_type: 'saving' };
           }
         }
@@ -1044,7 +1166,7 @@ Current user message: ${userMessage}`;
         .ilike('name', goalCreate.name)
         .maybeSingle();
       if (existingGoal) {
-        console.log(`[Agent1] Goal "${goalCreate.name}" already exists, skipping duplicate insert`);
+        if (__DEV__) console.log(`[Agent1] Goal "${goalCreate.name}" already exists, skipping duplicate insert`);
         goalCreate = null;
       }
     }
@@ -1062,7 +1184,7 @@ Current user message: ${userMessage}`;
       if (gcError) {
         console.error('[Agent1] Goal create error:', gcError);
       } else {
-        console.log(`[Agent1] Goal created: "${goalCreate.name}" target=${goalCreate.target_amount}`);
+        if (__DEV__) console.log(`[Agent1] Goal created: "${goalCreate.name}" target=${goalCreate.target_amount}`);
         clearAgentCache(userId).catch(() => {});
       }
     }
@@ -1085,13 +1207,82 @@ Current user message: ${userMessage}`;
         if (cbError) console.error('[Agent1] Category budget update error:', cbError);
         else console.log(`[Agent1] Category "${cat.name}" budget set to ${categoryBudgetUpdate.budget}`);
       } else {
-        console.warn('[Agent1] CATEGORY_BUDGET: no matching category for:', categoryBudgetUpdate.category_name);
+        if (__DEV__) console.warn('[Agent1] CATEGORY_BUDGET: no matching category for:', categoryBudgetUpdate.category_name);
+      }
+    }
+
+    // Handle investment data if Gemini emitted INVESTMENT_DATA
+    if (investmentData && investmentData.quantity > 0 && investmentData.buy_price > 0) {
+      const validTypes = ['stock', 'crypto', 'mutual_fund', 'gold', 'other'];
+      const assetType = validTypes.includes(investmentData.asset_type) ? investmentData.asset_type : 'other';
+
+      if (investmentData.action === 'sell') {
+        const { data: existing } = await supabase
+          .from('investments')
+          .select('id, quantity, buy_price')
+          .eq('user_id', userId)
+          .ilike('name', investmentData.name)
+          .maybeSingle();
+        if (existing) {
+          if (investmentData.quantity > Number(existing.quantity)) {
+            // Can't sell more than owned — tell the user
+            return {
+              response: `You only own ${existing.quantity} units of ${investmentData.name}. You can't sell ${investmentData.quantity}.`,
+              transaction: null,
+            };
+          }
+          const newQty = Number(existing.quantity) - investmentData.quantity;
+          if (newQty <= 0) {
+            await supabase.from('investments').delete().eq('id', existing.id);
+          } else {
+            await supabase.from('investments').update({ quantity: newQty }).eq('id', existing.id);
+          }
+          if (__DEV__) console.log(`[Agent1] Investment sold: "${investmentData.name}" qty=${investmentData.quantity}`);
+        } else {
+          return {
+            response: `I couldn't find "${investmentData.name}" in your portfolio. Check the name and try again.`,
+            transaction: null,
+          };
+        }
+      } else {
+        // Buy — upsert with weighted average price
+        const { data: existing } = await supabase
+          .from('investments')
+          .select('id, quantity, buy_price, current_value')
+          .eq('user_id', userId)
+          .ilike('name', investmentData.name)
+          .maybeSingle();
+
+        if (existing) {
+          const oldTotal = Number(existing.quantity) * Number(existing.buy_price);
+          const newTotal = investmentData.quantity * investmentData.buy_price;
+          const combinedQty = Number(existing.quantity) + investmentData.quantity;
+          const avgPrice = (oldTotal + newTotal) / combinedQty;
+          await supabase.from('investments').update({
+            quantity: combinedQty,
+            buy_price: Math.round(avgPrice * 100) / 100,
+            // Preserve existing current_value — don't overwrite with buy price
+          }).eq('id', existing.id);
+          if (__DEV__) console.log(`[Agent1] Investment updated: "${investmentData.name}" qty=${combinedQty} avg=${avgPrice.toFixed(2)}`);
+        } else {
+          await supabase.from('investments').insert({
+            user_id: userId,
+            name: investmentData.name,
+            ticker: investmentData.ticker ?? null,
+            asset_type: assetType,
+            quantity: investmentData.quantity,
+            buy_price: investmentData.buy_price,
+            current_value: investmentData.buy_price,
+            currency: profile?.currency ?? 'USD',
+          });
+          if (__DEV__) console.log(`[Agent1] Investment created: "${investmentData.name}" qty=${investmentData.quantity} price=${investmentData.buy_price}`);
+        }
       }
     }
 
     return { response: finalResponse, transaction: null };
   } catch (e) {
-    console.error('[Agent1] chatAgent Error:', e);
+    if (__DEV__) console.error('[Agent1] chatAgent Error:', e);
     captureError(e, { context: 'chatAgent', userId });
     const msg = e instanceof Error ? e.message : '';
     if (msg.includes('503') || msg.includes('high demand')) {
@@ -1126,7 +1317,11 @@ export async function checkImageTxLimit(userId: string): Promise<boolean> {
       await AsyncStorage.setItem(IMAGE_TX_LIMIT_KEY(userId, today), 'true');
       return true;
     }
-  } catch {}
+  } catch (e) {
+    // Fail closed: if we can't verify, assume limit is hit to prevent abuse
+    captureError(e, { context: 'checkImageTxLimit' });
+    return true;
+  }
   return false;
 }
 
@@ -1135,7 +1330,9 @@ export async function markImageTxUsed(userId: string): Promise<void> {
   await AsyncStorage.setItem(IMAGE_TX_LIMIT_KEY(userId, today), 'true');
   try {
     await supabase.auth.updateUser({ data: { image_scan_date: today } });
-  } catch {}
+  } catch (e) {
+    captureError(e, { context: 'markImageTxUsed' });
+  }
 }
 
 export type ImageTransaction = {
@@ -1157,7 +1354,7 @@ export async function parseTransactionsFromImage(
   base64Image: string,
   mimeType: string,
 ): Promise<ImageTransaction[]> {
-  if (!GEMINI_API_KEY) throw new Error('Gemini API key is not configured');
+  if (!GEMINI_PROXY_URL && !GEMINI_DIRECT_URL) throw new Error('Gemini is not configured');
   if (base64Image.length > MAX_IMAGE_BASE64_BYTES) throw new Error('IMAGE_TOO_LARGE');
 
   const prompt = `You are a financial transaction extractor. Analyze this image (it could be a receipt, bank statement, transaction history screenshot, or any financial document) and extract individual line item transactions.
@@ -1181,27 +1378,47 @@ Rules:
 - Delivery fees, shipping fees, and service charges associated with a purchase should use category "Shopping", not "Transport". Use "Transport" only for taxi, ride-share, bus, train, fuel, or parking
 - For receipts: extract each purchased item or service as a separate transaction; skip the final total row`;
 
+  const requestBody = JSON.stringify({
+    contents: [{ role: 'user', parts: [{ text: prompt }, { inlineData: { mimeType, data: base64Image } }] }],
+    generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
+  });
+
   const fetchWithRetry = async (): Promise<Response> => {
+    const token = await getAuthToken();
+    const useProxy = !!(GEMINI_PROXY_URL && token);
+
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt - 1]));
       const ctrl = new AbortController();
       const tid = setTimeout(() => ctrl.abort(), 30000);
       try {
-        const r = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ role: 'user', parts: [{ text: prompt }, { inlineData: { mimeType, data: base64Image } }] }],
-              generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
-            }),
-            signal: ctrl.signal,
+        const url = useProxy ? GEMINI_PROXY_URL! : GEMINI_DIRECT_URL!;
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (useProxy) headers['Authorization'] = `Bearer ${token}`;
+
+        let r: Response;
+        try {
+          r = await fetch(url, { method: 'POST', headers, body: requestBody, signal: ctrl.signal });
+        } catch (fetchErr) {
+          // Network error reaching proxy — fall back to direct
+          if (useProxy && GEMINI_DIRECT_URL) {
+            if (__DEV__) console.log('[ImageAgent] Proxy network error, falling back to direct');
+            r = await fetch(GEMINI_DIRECT_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: requestBody, signal: ctrl.signal });
+          } else {
+            throw fetchErr;
           }
-        );
+        }
+
         clearTimeout(tid);
+
+        // If proxy returned infra error, retry via direct
+        if (useProxy && isInfraError(r.status) && GEMINI_DIRECT_URL) {
+          if (__DEV__) console.log(`[ImageAgent] Proxy infra error (${r.status}), falling back to direct`);
+          r = await fetch(GEMINI_DIRECT_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: requestBody });
+        }
+
         if (r.status !== 429 && r.status !== 503) return r;
-        console.log(`[ImageAgent] ${r.status} error, retrying (attempt ${attempt + 1}/3)`);
+        if (__DEV__) console.log(`[ImageAgent] ${r.status} error, retrying (attempt ${attempt + 1}/3)`);
       } catch (e) {
         clearTimeout(tid);
         if (e instanceof Error && e.name === 'AbortError') throw new Error('Gemini image request timed out');

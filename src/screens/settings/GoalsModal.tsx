@@ -1,26 +1,20 @@
 import React, { useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  TextInput,
-  ActivityIndicator,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
-} from 'react-native';
+import { View, Text, TouchableOpacity, TextInput, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform, Alert, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useProfile } from '../../contexts/ProfileContext';
 import { supabase } from '../../lib/supabase';
 import { clearAgentCache } from '../../lib/agents';
-import { colors } from '../../lib/theme';
+import { t, fonts } from '../../theme/tokens';
 import { styles } from './settingsStyles';
+import Aurora from '../../components/Aurora';
+import GlassCard from '../../components/GlassCard';
 import type { Goal, Category } from './types';
+
+const { width: SW, height: SH } = Dimensions.get('window');
 
 const GOAL_TYPES = [
   { value: 'saving', label: 'Saving' },
-  { value: 'debt_payment', label: 'Debt Payment' },
+  { value: 'debt_payment', label: 'Debt' },
   { value: 'investment', label: 'Investment' },
   { value: 'expense', label: 'Expense' },
 ] as const;
@@ -42,203 +36,222 @@ export default function GoalsModal({ userId, onClose }: { userId: string; onClos
 
   const fetchGoals = () => {
     if (!userId) return;
-    supabase
-      .from('financial_goals')
-      .select('*')
-      .eq('user_id', userId)
-      .then(({ data, error }) => {
-        setLoading(false);
-        if (error) { console.warn('Goals fetch error:', error); setGoals([]); return; }
-        setGoals((data as Goal[]) ?? []);
-      });
+    supabase.from('financial_goals').select('*').eq('user_id', userId)
+      .then(({ data, error }) => { setLoading(false); setGoals(error ? [] : (data as Goal[]) ?? []); });
   };
 
   const fetchCategories = () => {
     if (!userId) return;
-    supabase
-      .from('categories')
-      .select('*')
-      .eq('user_id', userId)
-      .then(({ data, error }) => {
-        if (error) { console.warn('Categories fetch error:', error); setCategories([]); return; }
-        setCategories((data as Category[]) ?? []);
-      });
+    supabase.from('categories').select('*').eq('user_id', userId)
+      .then(({ data, error }) => { setCategories(error ? [] : (data as Category[]) ?? []); });
   };
 
-  useEffect(() => {
-    if (userId) {
-      setLoading(true);
-      fetchGoals();
-      fetchCategories();
-    }
-  }, [userId]);
+  useEffect(() => { if (userId) { setLoading(true); fetchGoals(); fetchCategories(); } }, [userId]);
 
   const handleAddGoal = async () => {
     const goalName = addName.trim();
     const targetAmount = addTarget.trim();
     const currentAmount = addCurrent.trim();
     const targetDate = addDate.trim();
-    console.log('Saving goal with:', { user_id: userId, name: goalName, target_amount: parseFloat(targetAmount), current_amount: parseFloat(currentAmount) || 0, target_date: targetDate, goal_type: selectedGoalType, status: 'in_progress' });
-    if (!goalName || !userId) return;
-    if (!targetAmount) return;
-    if (dateError) return;
+    if (!goalName || !userId || !targetAmount || dateError) return;
     setSaving(true);
-    // Append T12:00:00 so the date is parsed as local noon, not UTC midnight.
-    // Without this, "2027-02-01" parses as UTC 00:00 which displays as Jan 31 in UTC-x zones.
     const targetDateVal = targetDate
       ? new Date(`${targetDate}T12:00:00`).toISOString()
-      : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
-    const payload = {
-      user_id: userId,
-      name: goalName,
-      description: '',
-      target_amount: parseFloat(targetAmount),
-      current_amount: parseFloat(currentAmount) || 0,
-      target_date: targetDateVal,
-      goal_type: selectedGoalType,
-      status: 'in_progress',
+      : new Date(Date.now() + 365 * 86400000).toISOString();
+    const { error } = await supabase.from('financial_goals').insert({
+      user_id: userId, name: goalName, description: '',
+      target_amount: parseFloat(targetAmount), current_amount: parseFloat(currentAmount) || 0,
+      target_date: targetDateVal, goal_type: selectedGoalType, status: 'in_progress',
       category_id: selectedCategoryId || null,
-    };
-    const { error } = await supabase.from('financial_goals').insert(payload);
+    });
     setSaving(false);
     if (error) { Alert.alert('Error', JSON.stringify(error)); return; }
-    // Bust cached AI insights so the new goal is reflected on next Analytics visit
     clearAgentCache(userId).catch(() => {});
     Alert.alert('Success', 'Goal saved!');
-    setAddName('');
-    setAddTarget('');
-    setAddCurrent('');
-    setAddDate('');
-    setDateError('');
-    setSelectedCategoryId(null);
-    setSelectedGoalType('saving');
-    setShowAddForm(false);
+    resetForm();
     fetchGoals();
   };
 
-  const handleDeleteGoal = async (id: string) => {
-    const { error } = await supabase.from('financial_goals').delete().eq('id', id).eq('user_id', userId);
-    if (error) { console.warn('Goal delete error:', error); return; }
-    setGoals((g) => g.filter((x) => x.id !== id));
-    clearAgentCache(userId).catch(() => {});
+  const resetForm = () => {
+    setAddName(''); setAddTarget(''); setAddCurrent(''); setAddDate('');
+    setDateError(''); setSelectedCategoryId(null); setSelectedGoalType('saving'); setShowAddForm(false);
   };
 
+  const handleDeleteGoal = async (id: string, name: string) => {
+    Alert.alert('Delete Goal', `Delete "${name}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: async () => {
+          await supabase.from('financial_goals').delete().eq('id', id).eq('user_id', userId);
+          setGoals((g) => g.filter((x) => x.id !== id));
+          clearAgentCache(userId).catch(() => {});
+        },
+      },
+    ]);
+  };
+
+  const goalTypeLabel = (gt: string) => GOAL_TYPES.find((g) => g.value === gt)?.label ?? gt;
+
   return (
-    <SafeAreaView style={styles.fullModal} edges={['top', 'bottom']}>
-      <KeyboardAvoidingView style={styles.fullModalInner} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.modalHeader}>
-          <Text style={styles.modalHeaderTitle}>Goals</Text>
-          <View style={styles.modalHeaderRight}>
-            {!showAddForm && (
-              <TouchableOpacity style={styles.addButton} onPress={() => setShowAddForm(true)} activeOpacity={0.8}>
-                <Text style={styles.addButtonText}>Add Goal</Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.closeButton}>
-              <Text style={styles.closeButtonText}>✕</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {showAddForm ? (
-          <View style={styles.addForm}>
-            <TextInput style={styles.formInput} placeholder="Goal name" placeholderTextColor={colors.textSecondary} value={addName} onChangeText={setAddName} />
-            <Text style={styles.formLabelOptional}>Link to Category (optional)</Text>
-            <ScrollView horizontal style={styles.categoryChipsScroll} contentContainerStyle={styles.categoryChipsContent} showsHorizontalScrollIndicator={false}>
-              <TouchableOpacity style={[styles.goalCategoryChip, selectedCategoryId === null && styles.goalCategoryChipActive]} onPress={() => setSelectedCategoryId(null)} activeOpacity={0.8}>
-                <Text style={[styles.goalCategoryChipText, selectedCategoryId === null && styles.goalCategoryChipTextActive]}>None</Text>
-              </TouchableOpacity>
-              {categories.map((cat) => {
-                const selected = selectedCategoryId === cat.id;
-                return (
-                  <TouchableOpacity key={cat.id} style={[styles.goalCategoryChip, selected && styles.goalCategoryChipActive]} onPress={() => setSelectedCategoryId(cat.id)} activeOpacity={0.8}>
-                    <Text style={[styles.goalCategoryChipText, selected && styles.goalCategoryChipTextActive]}>{cat.emoji} {cat.name}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-            <Text style={styles.formLabel}>Goal type</Text>
-            <View style={styles.goalTypeChipsRow}>
-              {GOAL_TYPES.map((gt) => {
-                const active = selectedGoalType === gt.value;
-                return (
-                  <TouchableOpacity key={gt.value} style={[styles.goalTypeChip, active && styles.goalTypeChipActive]} onPress={() => setSelectedGoalType(gt.value)} activeOpacity={0.8}>
-                    <Text style={[styles.goalTypeChipText, active && styles.goalTypeChipTextActive]}>{gt.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            <TextInput style={styles.formInput} placeholder="Target amount" placeholderTextColor={colors.textSecondary} value={addTarget} onChangeText={setAddTarget} keyboardType="decimal-pad" />
-            <TextInput style={styles.formInput} placeholder="Current amount" placeholderTextColor={colors.textSecondary} value={addCurrent} onChangeText={setAddCurrent} keyboardType="decimal-pad" />
-            <TextInput
-              style={[styles.formInput, dateError ? { borderColor: colors.error, borderWidth: 1 } : {}]}
-              placeholder="Target date (YYYY-MM-DD)"
-              placeholderTextColor={colors.textSecondary}
-              value={addDate}
-              onChangeText={(text) => {
-                setAddDate(text);
-                if (text.trim()) {
-                  const valid = /^\d{4}-\d{2}-\d{2}$/.test(text.trim()) && !isNaN(new Date(text.trim()).getTime());
-                  setDateError(valid ? '' : 'Use format YYYY-MM-DD (e.g. 2025-12-31)');
-                } else {
-                  setDateError('');
-                }
-              }}
-            />
-            {dateError ? <Text style={{ color: colors.error, fontSize: 12, marginTop: -8, marginBottom: 8 }}>{dateError}</Text> : null}
-            <View style={styles.formButtons}>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => { setShowAddForm(false); setAddName(''); setAddTarget(''); setAddCurrent(''); setAddDate(''); setDateError(''); setSelectedCategoryId(null); setSelectedGoalType('saving'); }}>
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.saveButton} onPress={handleAddGoal} disabled={false}>
-                {saving ? <ActivityIndicator size="small" color={colors.textPrimary} /> : <Text style={styles.saveButtonText}>Save</Text>}
+    <View style={styles.modalRoot}>
+      <Aurora width={SW} height={SH} />
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Goals</Text>
+            <View style={styles.modalHeaderRight}>
+              {!showAddForm && (
+                <TouchableOpacity style={styles.addBtn} onPress={() => setShowAddForm(true)} activeOpacity={0.8}>
+                  <Text style={{ fontSize: 14, color: '#fff' }}>+</Text>
+                  <Text style={styles.addBtnText}>Add Goal</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+                <Text style={styles.closeBtnText}>✕</Text>
               </TouchableOpacity>
             </View>
           </View>
-        ) : null}
 
-        <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent} showsVerticalScrollIndicator={false}>
-          {loading ? (
-            <View style={styles.modalLoading}><ActivityIndicator size="large" color={colors.primary} /></View>
-          ) : goals.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No goals yet</Text>
-              <Text style={styles.emptySubtitle}>Set your first financial goal</Text>
-              <TouchableOpacity style={styles.emptyButton} onPress={() => setShowAddForm(true)}>
-                <Text style={styles.emptyButtonText}>Add Goal</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            goals.map((goal) => {
-              const target = goal.target_amount || 1;
-              const current = Math.min(goal.current_amount ?? 0, target);
-              const pct = Math.round((current / target) * 100);
-              const linkedCategory = goal.category_id ? categories.find((c) => c.id === goal.category_id) : null;
-              const targetDateStr = goal.target_date
-                ? new Date(goal.target_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-                : null;
-              return (
-                <View key={goal.id} style={styles.goalItem}>
-                  <View style={styles.goalItemTop}>
-                    <View style={styles.goalItemTitleRow}>
-                      <Text style={styles.goalName}>{goal.name}</Text>
-                      {linkedCategory && <Text style={styles.goalCategoryBadge}>{linkedCategory.emoji} {linkedCategory.name}</Text>}
-                    </View>
-                    <TouchableOpacity onPress={() => handleDeleteGoal(goal.id)} style={styles.deleteButton}>
-                      <Text style={styles.deleteButtonText}>🗑️</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <View style={styles.goalProgressTrack}>
-                    <View style={[styles.goalProgressFill, { width: `${pct}%` }]} />
-                  </View>
-                  <Text style={styles.goalProgressText}>{currencySymbol}{current.toFixed(2)} / {currencySymbol}{target.toFixed(2)}</Text>
-                  {targetDateStr ? <Text style={styles.goalDate}>{targetDateStr}</Text> : null}
+          <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent} showsVerticalScrollIndicator={false}>
+            {/* Add form */}
+            {showAddForm && (
+              <GlassCard style={styles.formCard}>
+                <Text style={styles.formTitle}>New goal</Text>
+                <TextInput style={styles.formInput} placeholder="Goal name" placeholderTextColor={t.text3} value={addName} onChangeText={setAddName} />
+
+                <Text style={styles.formLabel}>Link to category (optional)</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }} contentContainerStyle={{ gap: 8 }}>
+                  <TouchableOpacity style={[styles.chip, !selectedCategoryId && styles.chipActive]} onPress={() => setSelectedCategoryId(null)} activeOpacity={0.8}>
+                    <Text style={[styles.chipText, !selectedCategoryId && styles.chipTextActive]}>None</Text>
+                  </TouchableOpacity>
+                  {categories.map((cat) => {
+                    const sel = selectedCategoryId === cat.id;
+                    return (
+                      <TouchableOpacity key={cat.id} style={[styles.chip, sel && styles.chipActive]} onPress={() => setSelectedCategoryId(cat.id)} activeOpacity={0.8}>
+                        <Text style={[styles.chipText, sel && styles.chipTextActive]}>{cat.emoji} {cat.name}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+
+                <Text style={styles.formLabel}>Goal type</Text>
+                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+                  {GOAL_TYPES.map((gt) => {
+                    const active = selectedGoalType === gt.value;
+                    return (
+                      <TouchableOpacity key={gt.value} style={[styles.chip, active && styles.chipActive, { flex: 1, alignItems: 'center', minWidth: 70 }]} onPress={() => setSelectedGoalType(gt.value)} activeOpacity={0.8}>
+                        <Text style={[styles.chipText, active && styles.chipTextActive]}>{gt.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
-              );
-            })
-          )}
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+
+                <TextInput style={styles.formInput} placeholder="Target amount" placeholderTextColor={t.text3} value={addTarget} onChangeText={setAddTarget} keyboardType="decimal-pad" />
+                <TextInput style={styles.formInput} placeholder="Current amount" placeholderTextColor={t.text3} value={addCurrent} onChangeText={setAddCurrent} keyboardType="decimal-pad" />
+
+                <Text style={styles.formLabel}>Target date</Text>
+                <TextInput
+                  style={[styles.formInput, dateError ? { borderColor: t.red } : {}]}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={t.text3}
+                  value={addDate}
+                  onChangeText={(text) => {
+                    setAddDate(text);
+                    if (text.trim()) {
+                      const valid = /^\d{4}-\d{2}-\d{2}$/.test(text.trim()) && !isNaN(new Date(text.trim()).getTime());
+                      setDateError(valid ? '' : 'Use format YYYY-MM-DD');
+                    } else { setDateError(''); }
+                  }}
+                />
+                {dateError ? <Text style={{ color: t.red, fontSize: 12, marginTop: -10, marginBottom: 8, fontFamily: fonts.regular }}>{dateError}</Text> : null}
+
+                <View style={styles.formRow}>
+                  <TouchableOpacity style={styles.btnSecondary} onPress={resetForm}>
+                    <Text style={styles.btnSecondaryText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.btnPrimary} onPress={handleAddGoal} disabled={saving}>
+                    {saving ? <ActivityIndicator size="small" color="#fff" /> : (
+                      <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                        <Text style={{ fontSize: 14, color: '#fff' }}>✓</Text>
+                        <Text style={styles.btnPrimaryText}>Save</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </GlassCard>
+            )}
+
+            {/* List */}
+            {loading ? (
+              <View style={styles.modalLoading}><ActivityIndicator size="large" color={t.auraAqua} /></View>
+            ) : goals.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyTitle}>No goals yet</Text>
+                <Text style={styles.emptySubtitle}>Set your first financial goal</Text>
+                <TouchableOpacity style={styles.addBtn} onPress={() => setShowAddForm(true)}>
+                  <Text style={styles.addBtnText}>Add Goal</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              goals.map((goal) => {
+                const target = goal.target_amount || 1;
+                const current = Math.min(goal.current_amount ?? 0, target);
+                const pct = Math.round((current / target) * 100);
+                const targetDateStr = goal.target_date
+                  ? new Date(goal.target_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                  : null;
+                return (
+                  <GlassCard key={goal.id} style={styles.goalCard}>
+                    <View style={styles.goalTopRow}>
+                      <View style={styles.goalLeft}>
+                        <View style={styles.goalIcon}>
+                          <Text style={{ fontSize: 20 }}>🎯</Text>
+                        </View>
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={styles.goalName}>{goal.name}</Text>
+                          {goal.goal_type && (
+                            <View style={styles.goalTypeBadge}>
+                              <Text style={styles.goalTypeBadgeText}>{goalTypeLabel(goal.goal_type)}</Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.miniBtn, { backgroundColor: t.redTint, borderColor: t.red + '45' }]}
+                        onPress={() => handleDeleteGoal(goal.id, goal.name)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={{ fontSize: 16 }}>🗑️</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Progress */}
+                    <View style={styles.goalProgress}>
+                      <View style={[styles.barTrack, { height: 8 }]}>
+                        <View style={[styles.barFill, { width: `${pct}%`, height: 8, backgroundColor: t.auraAqua }]} />
+                      </View>
+                    </View>
+
+                    <View style={styles.goalStats}>
+                      <Text style={styles.goalAmounts}>
+                        {currencySymbol}{current.toFixed(0)}
+                        <Text style={styles.goalAmountTarget}> / {currencySymbol}{target.toFixed(0)}</Text>
+                      </Text>
+                      {targetDateStr && (
+                        <View style={styles.goalDate}>
+                          <Text style={{ fontSize: 13 }}>📅</Text>
+                          <Text style={styles.goalDateText}>{targetDateStr}</Text>
+                        </View>
+                      )}
+                    </View>
+                  </GlassCard>
+                );
+              })
+            )}
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </View>
   );
 }

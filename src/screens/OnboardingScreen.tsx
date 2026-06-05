@@ -201,27 +201,23 @@ export default function OnboardingScreen() {
   const handleSkip = () => advance();
 
   const completeOnboarding = React.useCallback(async () => {
-    console.log('[Onboarding] Step 1: completeOnboarding called');
-    console.log('[Onboarding] Step 2: userId =', user?.id);
+    if (__DEV__) console.log('[Onboarding] completeOnboarding called, userId:', user?.id);
     if (!user?.id) return;
     try {
       const { error } = await supabase
         .from('profiles')
         .upsert({ id: user.id, onboarding_complete: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: 'id' });
-      console.log('[Onboarding] Step 3: DB upsert error =', error);
       if (error) {
-        console.log('[Onboarding] Step 4: FAILED - DB error');
+        if (__DEV__) console.log('[Onboarding] DB upsert FAILED:', error);
         return;
       }
-      console.log('[Onboarding] Step 5: DB upsert SUCCESS');
+      if (__DEV__) console.log('[Onboarding] DB upsert SUCCESS');
       seedDefaultCategories(user.id).catch((e) =>
         console.error('[Onboarding] Seed categories error (non-fatal):', e)
       );
-      console.log('[Onboarding] Step 6: calling refreshProfile...');
       await refreshProfile();
-      console.log('[Onboarding] Step 7: refreshProfile done');
     } catch (e) {
-      console.log('[Onboarding] EXCEPTION:', e);
+      if (__DEV__) console.log('[Onboarding] EXCEPTION:', e);
     }
   }, [user?.id, refreshProfile]);
 
@@ -235,7 +231,7 @@ export default function OnboardingScreen() {
       } catch (e) {
         console.error('[Onboarding] Complete error:', e);
       } finally {
-        if (mounted) console.log('[Onboarding] completeOnboarding done');
+        if (mounted && __DEV__) console.log('[Onboarding] completeOnboarding done');
       }
     })();
     return () => { mounted = false; };

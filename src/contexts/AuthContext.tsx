@@ -40,7 +40,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
       if (session?.user?.id) {
         setSentryUser(session.user.id);
-        identifyUser(session.user.id, { email: session.user.email ?? '' });
+        identifyUser(session.user.id);
       } else {
         clearSentryUser();
         resetUser();
@@ -56,7 +56,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signUp = async (email: string, password: string, fullName?: string) => {
-    console.log('[AuthContext] signUp called', { email: email?.length ? '***' : '(empty)', hasPassword: !!password, hasFullName: !!fullName, hasSupabaseConfig });
+    if (__DEV__) console.log('[AuthContext] signUp called', { hasEmail: !!email, hasPassword: !!password, hasFullName: !!fullName, hasSupabaseConfig });
     if (!hasSupabaseConfig) {
       console.error('[AuthContext] Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY');
       return { error: new Error('App configuration error. Please check your environment variables.') };
@@ -67,7 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         password,
         options: fullName?.trim() ? { data: { full_name: fullName.trim() } } : undefined,
       });
-      console.log('[AuthContext] signUp result', { hasUser: !!data?.user, error: error?.message ?? null });
+      if (__DEV__) console.log('[AuthContext] signUp result', { hasUser: !!data?.user, error: error?.message ?? null });
       if (error) {
         console.warn('[AuthContext] signUp error', error.message, error);
         return { error: error as Error };

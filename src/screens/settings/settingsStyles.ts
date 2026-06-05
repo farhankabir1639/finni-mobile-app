@@ -1,554 +1,634 @@
 import { StyleSheet } from 'react-native';
-import { colors } from '../../lib/theme';
+import { t, fonts } from '../../theme/tokens';
 
 export const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+  // ── Root / layout ──
+  root: { flex: 1, backgroundColor: t.auraBg },
+  scroll: { flex: 1 },
+  scrollContent: { paddingHorizontal: 22, paddingBottom: 120 },
+
+  // ── Header ──
+  header: {
+    paddingHorizontal: 22,
+    paddingTop: 62,
+    paddingBottom: 8,
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.textPrimary,
+    fontSize: 28,
+    fontFamily: fonts.extraBold,
+    fontWeight: '800',
+    color: t.text,
+    letterSpacing: -0.6,
   },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 32,
-  },
+
+  // ── Profile card ──
   profileCard: {
-    backgroundColor: colors.cardBackground,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 24,
     alignItems: 'center',
+    padding: 26,
+    paddingBottom: 24,
     marginBottom: 24,
+    overflow: 'hidden',
   },
   avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
+    width: 84,
+    height: 84,
+    borderRadius: 42,
     alignItems: 'center',
-    marginBottom: 12,
+    justifyContent: 'center',
   },
   avatarText: {
-    fontSize: 24,
+    fontSize: 34,
+    fontFamily: fonts.bold,
     fontWeight: '700',
-    color: colors.textPrimary,
+    color: '#fff',
   },
   profileName: {
-    fontSize: 18,
+    fontSize: 20,
+    fontFamily: fonts.bold,
     fontWeight: '700',
-    color: colors.textPrimary,
-    marginBottom: 4,
+    color: t.text,
+    marginTop: 16,
   },
   profileEmail: {
     fontSize: 14,
-    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    color: t.text2,
+    marginTop: 4,
   },
-  section: {
-    marginBottom: 24,
-  },
-  sectionHeader: {
-    fontSize: 13,
+
+  // ── Section ──
+  sectionLabel: {
+    fontSize: 11,
+    fontFamily: fonts.semiBold,
     fontWeight: '600',
-    color: colors.textSecondary,
-    marginBottom: 8,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    color: t.text3,
+    marginBottom: 12,
     marginLeft: 4,
   },
-  item: {
+  section: { marginBottom: 24 },
+
+  // ── Settings row ──
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.cardBackground,
+    gap: 14,
+    padding: 15,
+    paddingHorizontal: 16,
+    borderRadius: t.rMd,
+    backgroundColor: t.glass2,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 8,
+    borderColor: t.glassLine,
+    marginBottom: 10,
   },
-  itemText: {
+  rowDanger: {
+    backgroundColor: 'rgba(251,113,133,0.08)',
+    borderColor: 'rgba(251,113,133,0.35)',
+  },
+  rowIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowLabel: {
+    flex: 1,
     fontSize: 16,
+    fontFamily: fonts.medium,
     fontWeight: '500',
-    color: colors.textPrimary,
+    color: t.text,
   },
-  chevron: {
+  rowChevron: {
     fontSize: 18,
-    color: colors.textSecondary,
+    color: t.text3,
     fontWeight: '600',
   },
-  signOutButton: {
-    backgroundColor: colors.error,
-    borderRadius: 12,
-    padding: 16,
+
+  // ── Disclaimer ──
+  disclaimer: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 22,
+    paddingHorizontal: 4,
+  },
+  disclaimerText: {
+    flex: 1,
+    fontSize: 12.5,
+    fontFamily: fonts.medium,
+    fontWeight: '500',
+    color: t.text3,
+    lineHeight: 20,
+  },
+
+  // ── Sign out button ──
+  signOutBtn: {
+    marginTop: 22,
+    paddingVertical: 17,
+    borderRadius: t.rMd,
     alignItems: 'center',
-    marginTop: 8,
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 9,
   },
   signOutText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textPrimary,
+    fontSize: 17,
+    fontFamily: fonts.bold,
+    fontWeight: '700',
+    color: '#fff',
   },
-  fullModal: {
-    flex: 1,
-    backgroundColor: '#0A0F1E',
-    paddingTop: 60,
-  },
-  fullModalInner: {
-    flex: 1,
-  },
+
+  // ═══ Modal shared ═══
+  modalRoot: { flex: 1, backgroundColor: t.auraBg },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    paddingHorizontal: 22,
+    paddingTop: 60,
+    paddingBottom: 16,
   },
-  modalHeaderTitle: {
-    fontSize: 24,
+  modalTitle: {
+    fontSize: 26,
+    fontFamily: fonts.bold,
     fontWeight: '700',
-    color: colors.textPrimary,
+    color: t.text,
+    letterSpacing: -0.5,
   },
   modalHeaderRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
   },
-  addButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
+  closeBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: t.rPill,
+    backgroundColor: t.glass,
+    borderWidth: 1,
+    borderColor: t.glassLine,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeBtnText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: t.text2,
+  },
+  modalScroll: { flex: 1 },
+  modalScrollContent: { padding: 22, paddingBottom: 100 },
+  modalLoading: { paddingVertical: 48, alignItems: 'center' },
+
+  // ── Add/Action button (small) ──
+  addBtn: {
     paddingHorizontal: 16,
     paddingVertical: 10,
+    borderRadius: t.rMd,
+    backgroundColor: t.auraIndigo,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
-  addButtonText: {
+  addBtnText: {
     fontSize: 14,
+    fontFamily: fonts.semiBold,
     fontWeight: '600',
-    color: colors.textPrimary,
+    color: '#fff',
   },
-  closeButton: {
-    padding: 4,
-  },
-  closeButtonText: {
-    fontSize: 20,
-    color: colors.textSecondary,
-    fontWeight: '600',
-  },
-  addForm: {
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  formInput: {
-    backgroundColor: colors.cardBackground,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
+  aiBudgetBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
     paddingVertical: 12,
-    fontSize: 16,
-    color: colors.textPrimary,
-    marginBottom: 12,
+    borderRadius: t.rMd,
+    backgroundColor: t.glass2,
+    borderWidth: 1,
+    borderColor: t.glassLine2,
+  },
+  aiBudgetText: {
+    fontSize: 14,
+    fontFamily: fonts.semiBold,
+    fontWeight: '600',
+    color: t.auraAqua,
+  },
+
+  // ── Form ──
+  formCard: {
+    padding: 18,
+    marginBottom: 20,
+  },
+  formTitle: {
+    fontSize: 17,
+    fontFamily: fonts.semiBold,
+    fontWeight: '600',
+    color: t.text,
+    letterSpacing: -0.3,
+    marginBottom: 14,
   },
   formLabel: {
-    fontSize: 13,
+    fontSize: 11,
+    fontFamily: fonts.semiBold,
     fontWeight: '600',
-    color: colors.textSecondary,
-    marginBottom: 8,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    color: t.text3,
+    marginBottom: 10,
   },
-  formLabelOptional: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#94A3B8',
-    marginBottom: 8,
-  },
-  periodChipsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
-  },
-  periodChip: {
-    flex: 1,
-    backgroundColor: colors.cardBackground,
+  formInput: {
+    backgroundColor: t.glass,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 999,
+    borderColor: t.glassLine,
+    borderRadius: t.rMd,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 15.5,
+    fontFamily: fonts.medium,
+    fontWeight: '500',
+    color: t.text,
+    marginBottom: 14,
+  },
+  formInputBig: {
+    height: 60,
+    fontSize: 17,
+    paddingHorizontal: 18,
+  },
+  formRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 2,
+  },
+
+  // ── Chip (generic glass chip) ──
+  chip: {
+    paddingHorizontal: 18,
     paddingVertical: 10,
-    alignItems: 'center',
-  },
-  periodChipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  periodChipText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textSecondary,
-  },
-  periodChipTextActive: {
-    color: colors.textPrimary,
-  },
-  formButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 8,
-  },
-  cancelButton: {
-    flex: 1,
-    backgroundColor: colors.cardBackground,
+    borderRadius: t.rPill,
+    backgroundColor: t.glass,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
+    borderColor: t.glassLine,
   },
-  cancelButtonText: {
-    fontSize: 16,
+  chipActive: {
+    backgroundColor: t.auraIndigo,
+    borderColor: 'transparent',
+  },
+  chipText: {
+    fontSize: 14,
+    fontFamily: fonts.semiBold,
     fontWeight: '600',
-    color: colors.textSecondary,
+    color: t.text2,
   },
-  saveButton: {
+  chipTextActive: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+
+  // ── Buttons ──
+  btnPrimary: {
     flex: 1,
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    padding: 14,
+    paddingVertical: 14,
+    borderRadius: t.rMd,
+    backgroundColor: t.auraIndigo,
     alignItems: 'center',
-    minWidth: 80,
+    justifyContent: 'center',
   },
-  saveButtonText: {
+  btnPrimaryText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: colors.textPrimary,
+    fontFamily: fonts.bold,
+    fontWeight: '700',
+    color: '#fff',
   },
-  modalScroll: {
+  btnSecondary: {
     flex: 1,
-  },
-  modalScrollContent: {
-    padding: 20,
-    paddingBottom: 100,
-  },
-  modalLoading: {
-    paddingVertical: 48,
+    paddingVertical: 14,
+    borderRadius: t.rMd,
+    backgroundColor: t.glass,
+    borderWidth: 1,
+    borderColor: t.glassLine,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  emptyState: {
+  btnSecondaryText: {
+    fontSize: 16,
+    fontFamily: fonts.semiBold,
+    fontWeight: '600',
+    color: t.text2,
+  },
+
+  // ── Mini button (edit/delete) ──
+  miniBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
     alignItems: 'center',
-    paddingVertical: 48,
+    justifyContent: 'center',
+    backgroundColor: t.glass,
+    borderWidth: 1,
+    borderColor: t.glassLine,
   },
+
+  // ── Empty state ──
+  emptyState: { alignItems: 'center', paddingVertical: 48 },
   emptyTitle: {
     fontSize: 18,
+    fontFamily: fonts.bold,
     fontWeight: '700',
-    color: colors.textPrimary,
+    color: t.text,
     marginBottom: 8,
   },
   emptySubtitle: {
     fontSize: 14,
-    color: colors.textSecondary,
+    fontFamily: fonts.regular,
+    color: t.text2,
     marginBottom: 20,
   },
-  emptyButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-  },
-  emptyButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textPrimary,
-  },
-  categoryItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.cardBackground,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
+
+  // ── Category card ──
+  catCard: {
     padding: 16,
+    paddingHorizontal: 18,
     marginBottom: 12,
   },
-  categoryItemLeft: {
+  catTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 14,
+  },
+  catIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  catInfo: { flex: 1, minWidth: 0 },
+  catName: {
+    fontSize: 16,
+    fontFamily: fonts.semiBold,
+    fontWeight: '600',
+    color: t.text,
+  },
+  catBudget: {
+    fontSize: 13.5,
+    fontFamily: fonts.semiBold,
+    fontWeight: '600',
+    color: t.auraAqua,
+    marginTop: 3,
+  },
+  catProgress: { marginTop: 13 },
+  catProgressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 7,
+  },
+  catSpent: {
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: t.text3,
+  },
+  catPct: {
+    fontSize: 12,
+    fontFamily: fonts.bold,
+    fontWeight: '700',
+  },
+  barTrack: {
+    height: 6,
+    borderRadius: 99,
+    backgroundColor: t.surface3,
+    overflow: 'hidden',
+  },
+  barFill: {
+    height: '100%',
+    borderRadius: 99,
+  },
+
+  // ── Goal card ──
+  goalCard: {
+    padding: 18,
+    paddingBottom: 20,
+    marginBottom: 14,
+  },
+  goalTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  goalLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
     flex: 1,
-    marginRight: 8,
+    minWidth: 0,
   },
-  categoryEmoji: {
-    fontSize: 24,
-    marginRight: 12,
-  },
-  categoryName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    marginBottom: 4,
-  },
-  categoryAmounts: {
-    flexDirection: 'column',
-    gap: 2,
-  },
-  categoryBudget: {
-    fontSize: 14,
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  categorySpent: {
-    fontSize: 14,
-    color: colors.textSecondary,
-  },
-  deleteButton: {
-    padding: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.error,
-  },
-  deleteButtonText: {
-    fontSize: 20,
-  },
-  goalItem: {
-    backgroundColor: colors.cardBackground,
-    borderWidth: 1,
-    borderColor: colors.border,
+  goalIcon: {
+    width: 40,
+    height: 40,
     borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-  },
-  goalItemTop: {
-    flexDirection: 'row',
+    backgroundColor: t.cyanTint,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
+    justifyContent: 'center',
   },
   goalName: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.textPrimary,
-    flex: 1,
-  },
-  goalTarget: {
-    fontSize: 14,
-    color: colors.primary,
+    fontSize: 16.5,
+    fontFamily: fonts.semiBold,
     fontWeight: '600',
-    marginBottom: 8,
+    color: t.text,
   },
-  goalProgressTrack: {
-    height: 8,
-    backgroundColor: colors.border,
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginBottom: 8,
+  goalTypeBadge: {
+    marginTop: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 2,
+    borderRadius: 99,
+    backgroundColor: 'rgba(139,92,246,0.18)',
+    alignSelf: 'flex-start',
   },
-  goalProgressFill: {
-    height: '100%',
-    backgroundColor: '#6366F1',
-    borderRadius: 4,
+  goalTypeBadgeText: {
+    fontSize: 10.5,
+    fontFamily: fonts.bold,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    color: t.auraViolet,
   },
-  goalProgressText: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    marginBottom: 4,
+  goalProgress: { marginTop: 16 },
+  goalStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 11,
+  },
+  goalAmounts: {
+    fontSize: 13.5,
+    fontFamily: fonts.bold,
+    fontWeight: '700',
+    color: t.text,
+  },
+  goalAmountTarget: {
+    color: t.text3,
+    fontWeight: '500',
   },
   goalDate: {
-    fontSize: 12,
-    color: '#94A3B8',
-  },
-  goalItemTitleRow: {
-    flex: 1,
-  },
-  goalCategoryBadge: {
-    fontSize: 12,
-    color: '#94A3B8',
-    marginTop: 2,
-  },
-  categoryChipsScroll: {
-    maxHeight: 44,
-    marginBottom: 16,
-  },
-  categoryChipsContent: {
     flexDirection: 'row',
-    paddingVertical: 4,
-    gap: 8,
-  },
-  goalCategoryChip: {
-    backgroundColor: '#111827',
-    borderWidth: 1,
-    borderColor: '#1E2A3A',
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  goalCategoryChipActive: {
-    backgroundColor: '#6366F1',
-    borderColor: '#6366F1',
-  },
-  goalCategoryChipText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#94A3B8',
-  },
-  goalCategoryChipTextActive: {
-    color: '#FFFFFF',
-  },
-  goalTypeChipsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
-  },
-  goalTypeChip: {
-    flex: 1,
-    backgroundColor: '#111827',
-    borderWidth: 1,
-    borderColor: '#1E2A3A',
-    borderRadius: 999,
-    paddingVertical: 10,
     alignItems: 'center',
+    gap: 5,
   },
-  goalTypeChipActive: {
-    backgroundColor: '#6366F1',
-    borderColor: '#6366F1',
+  goalDateText: {
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: t.text3,
   },
-  goalTypeChipText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#94A3B8',
-  },
-  goalTypeChipTextActive: {
-    color: '#FFFFFF',
-  },
+
+  // ── Currency item ──
   currencyItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.cardBackground,
+    gap: 16,
+    padding: 15,
+    paddingHorizontal: 18,
+    borderRadius: t.rLg,
+    backgroundColor: t.surface,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 16,
+    borderColor: t.line,
     marginBottom: 10,
   },
   currencyItemActive: {
-    borderColor: colors.primary,
-    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+    backgroundColor: t.indigoTint,
+    borderColor: t.lineIndigo,
   },
-  currencyItemLeft: {
-    flexDirection: 'row',
+  currencySymBox: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: t.surface2,
+    borderWidth: 1,
+    borderColor: t.line,
     alignItems: 'center',
-    gap: 16,
+    justifyContent: 'center',
   },
-  currencySymbol: {
-    fontSize: 22,
+  currencySym: {
+    fontSize: 18,
+    fontFamily: fonts.bold,
     fontWeight: '700',
-    color: colors.textSecondary,
-    width: 32,
-    textAlign: 'center',
+    color: t.text2,
   },
-  currencySymbolActive: {
-    color: colors.primary,
-  },
+  currencySymActive: { color: t.indigoBright },
   currencyCode: {
     fontSize: 16,
-    fontWeight: '700',
-    color: colors.textPrimary,
+    fontFamily: fonts.semiBold,
+    fontWeight: '600',
+    color: t.text,
   },
-  currencyCodeActive: {
-    color: colors.primary,
-  },
+  currencyCodeActive: { color: t.indigoBright },
   currencyName: {
     fontSize: 13,
-    color: colors.textSecondary,
+    fontFamily: fonts.medium,
+    color: t.text3,
     marginTop: 2,
   },
   currencyCheck: {
-    fontSize: 18,
-    color: colors.primary,
-    fontWeight: '700',
-  },
-  editColorRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
-    flexWrap: 'wrap',
-  },
-  colorCircle: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-  },
-  colorCircleSelected: {
-    borderWidth: 3,
-    borderColor: '#FFFFFF',
-  },
-  categoryRowActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  editButton: {
-    padding: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.primary,
-  },
-  editButtonText: {
-    fontSize: 18,
-  },
-  incomeBanner: {
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(16, 185, 129, 0.3)',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: t.indigo,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // ── Income banner ──
+  incomeBanner: {
+    padding: 20,
+    borderRadius: t.rXl,
+    backgroundColor: t.greenTint,
+    borderWidth: 1,
+    borderColor: 'rgba(52,211,153,0.3)',
+    alignItems: 'center',
+    marginBottom: 22,
   },
   incomeBannerLabel: {
-    fontSize: 12,
+    fontSize: 11,
+    fontFamily: fonts.semiBold,
     fontWeight: '600',
-    color: colors.success,
-    marginBottom: 4,
+    letterSpacing: 1.5,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    color: t.green,
   },
   incomeBannerAmount: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.success,
+    fontSize: 32,
+    fontFamily: fonts.extraBold,
+    fontWeight: '800',
+    color: t.green,
+    marginTop: 10,
+    letterSpacing: -0.5,
   },
-  incomeItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.cardBackground,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
+
+  // ── Income item ──
+  incomeCard: {
     padding: 16,
+    paddingHorizontal: 18,
     marginBottom: 12,
   },
-  incomeItemLeft: {
-    flex: 1,
+  incomeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
   },
+  incomeIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: t.greenTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  incomeInfo: { flex: 1 },
   incomeLabel: {
     fontSize: 16,
+    fontFamily: fonts.semiBold,
     fontWeight: '600',
-    color: colors.textPrimary,
-    marginBottom: 4,
+    color: t.text,
   },
-  incomeSubLabel: {
-    fontSize: 13,
-    color: colors.textSecondary,
+  incomeSub: {
+    fontSize: 13.5,
+    fontFamily: fonts.medium,
+    color: t.text3,
+    marginTop: 3,
+  },
+  incomeDeleteBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 11,
+    backgroundColor: t.redTint,
+    borderWidth: 1,
+    borderColor: 'rgba(251,113,133,0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // ── Info box (edit profile) ──
+  infoBox: {
+    marginTop: 18,
+    padding: 14,
+    paddingHorizontal: 16,
+    borderRadius: t.rMd,
+    backgroundColor: t.indigoTint,
+    borderWidth: 1,
+    borderColor: t.lineIndigo,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  infoBoxText: {
+    flex: 1,
+    fontSize: 13.5,
+    fontFamily: fonts.medium,
+    fontWeight: '500',
+    color: t.text2,
+    lineHeight: 21,
+  },
+  infoBoxHighlight: {
+    color: t.indigoBright,
+    fontWeight: '700',
   },
 });
