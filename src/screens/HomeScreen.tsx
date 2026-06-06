@@ -3,7 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity,
   Pressable, KeyboardAvoidingView, Platform, Modal, Alert,
-  ActionSheetIOS, Linking, Animated, useWindowDimensions,
+  ActionSheetIOS, Linking, Animated, useWindowDimensions, Keyboard,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -604,7 +604,7 @@ export default function HomeScreen() {
           keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
           {/* ── TOP SECTION ── */}
-          <View style={styles.topSection}>
+          <Pressable style={styles.topSection} onPress={Keyboard.dismiss}>
             {/* Header row */}
             <View style={styles.headerRow}>
               <View>
@@ -672,7 +672,7 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               </View>
             ) : null}
-          </View>
+          </Pressable>
 
           <View style={styles.divider} />
 
@@ -682,6 +682,7 @@ export default function HomeScreen() {
             style={styles.chatScroll}
             contentContainerStyle={styles.chatContent}
             showsVerticalScrollIndicator={false}
+            keyboardDismissMode="on-drag"
             keyboardShouldPersistTaps="handled"
           >
             {/* Inline chips — empty state */}
