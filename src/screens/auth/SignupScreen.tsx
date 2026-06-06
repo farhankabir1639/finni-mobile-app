@@ -22,6 +22,7 @@ import { t, fonts, gradients } from '../../theme/tokens';
 import Svg, { Path } from 'react-native-svg';
 
 const PRIVACY_URL = 'https://www.heyfinni.com/privacy-policy';
+const TERMS_URL = 'https://www.heyfinni.com/terms';
 const DATA_DELETION_URL = 'https://www.heyfinni.com/data-deletion';
 
 type SignupScreenProps = {
@@ -242,6 +243,10 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
           <Text style={[styles.legalText, { fontFamily: fonts.regular }]}>
             By creating an account you agree to our{' '}
           </Text>
+          <TouchableOpacity onPress={() => Linking.openURL(TERMS_URL)}>
+            <Text style={[styles.legalLink, { fontFamily: fonts.medium }]}>Terms of Service</Text>
+          </TouchableOpacity>
+          <Text style={[styles.legalText, { fontFamily: fonts.regular }]}> and{' '}</Text>
           <TouchableOpacity onPress={() => Linking.openURL(PRIVACY_URL)}>
             <Text style={[styles.legalLink, { fontFamily: fonts.medium }]}>Privacy Policy</Text>
           </TouchableOpacity>

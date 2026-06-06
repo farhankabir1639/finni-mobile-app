@@ -100,6 +100,7 @@ export default function SettingsScreen() {
                   if (!user?.id) return;
                   setDeletingAccount(true);
                   try {
+                    // Delete all user data across every table
                     await Promise.all([
                       supabase.from('transactions').delete().eq('user_id', user.id),
                       supabase.from('categories').delete().eq('user_id', user.id),
@@ -108,9 +109,12 @@ export default function SettingsScreen() {
                       supabase.from('investments').delete().eq('user_id', user.id),
                     ]);
                     await supabase.from('profiles').delete().eq('id', user.id);
+                    // Clear local cache
                     const keys = await AsyncStorage.getAllKeys();
                     const appKeys = keys.filter((k) => k.includes(user.id));
                     if (appKeys.length) await AsyncStorage.multiRemove(appKeys);
+                    // Delete the auth user itself so credentials are fully erased
+                    await supabase.rpc('delete_user');
                     await signOut();
                   } catch (e) {
                     if (__DEV__) console.error('[Settings] Delete account error:', e);
