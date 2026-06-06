@@ -394,6 +394,10 @@ export default function InvestmentsScreen() {
                 <Text style={{ fontSize: 20, color: t.text3 }}>→</Text>
               </GlassCard>
             </TouchableOpacity>
+            {/* Disclaimer */}
+            <Text style={s.disclaimer}>
+              Investment tracking is for record-keeping only. This app does not provide investment advice or recommendations. Consult a qualified professional before making investment decisions.
+            </Text>
           </>
         )}
       </ScrollView>
@@ -646,4 +650,5 @@ const s = StyleSheet.create({
   saveBtnText: { fontSize: 16, fontFamily: fonts.bold, fontWeight: '700', color: '#fff' },
   deleteBtn: { marginTop: 16, paddingVertical: 14, alignItems: 'center' },
   deleteBtnText: { fontSize: 15, fontFamily: fonts.semiBold, fontWeight: '600', color: t.red },
+  disclaimer: { fontSize: 10, fontFamily: fonts.regular, color: t.text4, textAlign: 'center', marginTop: 16, paddingHorizontal: 8, lineHeight: 14 },
 });

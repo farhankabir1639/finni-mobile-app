@@ -105,6 +105,7 @@ export default function SettingsScreen() {
                       supabase.from('categories').delete().eq('user_id', user.id),
                       supabase.from('financial_goals').delete().eq('user_id', user.id),
                       supabase.from('income').delete().eq('user_id', user.id),
+                      supabase.from('investments').delete().eq('user_id', user.id),
                     ]);
                     await supabase.from('profiles').delete().eq('id', user.id);
                     const keys = await AsyncStorage.getAllKeys();

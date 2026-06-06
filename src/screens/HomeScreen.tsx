@@ -429,7 +429,7 @@ export default function HomeScreen() {
       const updated = [...messages, userMsg, aiMsg];
       setMessages(updated);
       saveSession(user.id, updated as SessionMessage[], sessionDate);
-      if (transaction) { fetchStats(); fetchChatContext(); trackEvent('transaction_logged', { category: transaction.category, amount: transaction.amount }); }
+      if (transaction) { fetchStats(); fetchChatContext(); trackEvent('transaction_logged', { category: transaction.category }); }
       trackEvent('chat_message_sent');
     } catch (e) {
       captureError(e, { context: 'handleSend', userId: user?.id });
