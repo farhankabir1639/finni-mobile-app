@@ -1,9 +1,8 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import {
   View,
   TouchableOpacity,
   StyleSheet,
-  Animated,
   Platform,
   Text,
 } from 'react-native';
@@ -81,40 +80,9 @@ const TAB_LABELS: Record<string, string> = {
 export default function GlassDock({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const routes = state.routes;
-  const tabCount = routes.length;
-  const tabWidth = 1 / tabCount;
-
-  // Sliding indicator X position
-  const indicatorAnim = useRef(new Animated.Value(state.index * tabWidth)).current;
-
-  useEffect(() => {
-    Animated.spring(indicatorAnim, {
-      toValue: state.index * tabWidth,
-      useNativeDriver: true,
-      tension: 68,
-      friction: 11,
-    }).start();
-  }, [state.index]);
 
   const dockContent = (
     <View style={styles.inner}>
-      {/* sliding glow indicator */}
-      <Animated.View
-        style={[
-          styles.indicator,
-          {
-            width: `${tabWidth * 100}%` as any,
-            transform: [{
-              translateX: indicatorAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0, DOCK_ESTIMATE_WIDTH],
-              }),
-            }],
-          },
-        ]}
-        pointerEvents="none"
-      />
-
       {routes.map((route, i) => {
         const focused = state.index === i;
         const onPress = () => {
@@ -132,6 +100,8 @@ export default function GlassDock({ state, descriptors, navigation }: BottomTabB
             style={styles.tab}
             activeOpacity={0.7}
           >
+            {/* per-tab indicator — stays within the cell, adapts to pill corners */}
+            {focused && <View style={styles.indicator} />}
             {IconComp ? <IconComp color={color} /> : <Text style={{ color }}>{label[0]}</Text>}
             <Text style={[styles.label, { color }]}>{label}</Text>
           </TouchableOpacity>
@@ -154,10 +124,6 @@ export default function GlassDock({ state, descriptors, navigation }: BottomTabB
     </View>
   );
 }
-
-// Rough estimate for the translateX interpolation — real width measured at render
-// The spring animation will self-correct once the tab bar renders at full width
-const DOCK_ESTIMATE_WIDTH = 360;
 
 const styles = StyleSheet.create({
   wrapper: {
@@ -195,14 +161,16 @@ const styles = StyleSheet.create({
   },
   indicator: {
     position: 'absolute',
-    top: 6,
+    top: 0,
+    alignSelf: 'center',
+    width: 24,
     height: 2,
-    borderRadius: 2,
+    borderRadius: 1,
     backgroundColor: t.auraAqua,
     shadowColor: t.auraAqua,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.9,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowRadius: 6,
+    elevation: 6,
   },
 });

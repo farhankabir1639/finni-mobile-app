@@ -619,7 +619,7 @@ export default function HomeScreen() {
             {/* ArcMeter hero */}
             <View style={styles.arcSection}>
               <ArcMeter size={200} pct={monthUsedPct} markerPct={monthElapsedPct}>
-                <Orb size={84} rings talking={isTyping} />
+                <Orb size={84} rings={false} talking={isTyping} />
                 <Text style={[styles.arcPct, { fontFamily: fonts.extraBold }]}>{monthUsedPct}%</Text>
                 <Text style={[styles.arcSub, { fontFamily: fonts.medium }]}>budget used</Text>
               </ArcMeter>

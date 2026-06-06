@@ -28,21 +28,23 @@ export default function Orb({ size = 80, rings = true, talking = false, style }:
 
   return (
     <View style={[{ width: size, height: size }, style]}>
-      {/* outer halo */}
-      <Animated.View
-        style={[
-          styles.halo,
-          {
-            width: size * 1.9,
-            height: size * 1.9,
-            borderRadius: size * 0.95,
-            top: -(size * 0.45),
-            left: -(size * 0.45),
-            opacity: haloAnim,
-          },
-        ]}
-        pointerEvents="none"
-      />
+      {/* outer halo — only when rings enabled */}
+      {rings && (
+        <Animated.View
+          style={[
+            styles.halo,
+            {
+              width: size * 1.9,
+              height: size * 1.9,
+              borderRadius: size * 0.95,
+              top: -(size * 0.45),
+              left: -(size * 0.45),
+              opacity: haloAnim,
+            },
+          ]}
+          pointerEvents="none"
+        />
+      )}
 
       {/* sonar pulse rings */}
       {rings && [0, 1, 2].map(i => (
