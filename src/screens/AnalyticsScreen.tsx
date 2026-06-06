@@ -8,6 +8,7 @@ import {
   TextInput,
   ActivityIndicator,
   Dimensions,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -76,7 +77,8 @@ type Transaction = {
 };
 
 type CategoryTotal = { name: string; amount: number };
-type PeriodOption = 'week' | 'month' | '3months' | 'year';
+type PeriodOption = 'week' | 'month' | '3months' | 'year' | 'custom';
+type DateRange = { start: string; end: string };
 
 // ── Helpers ──
 function getPeriodStart(period: PeriodOption): Date {
@@ -142,6 +144,140 @@ function ChartInsight({ text, tone }: { text: string; tone: string }) {
     </View>
   );
 }
+
+// ── DateRangePicker ──
+const MONTHS_LIST = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const DOW_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+function isoDate(y: number, m: number, d: number) {
+  return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+function fmtShort(iso: string) {
+  const [, m, d] = iso.split('-').map(Number);
+  return `${MONTHS_LIST[m - 1].slice(0, 3)} ${d}`;
+}
+
+function DateRangePicker({ visible, value, onApply, onClose }: {
+  visible: boolean; value: DateRange | null;
+  onApply: (r: DateRange) => void; onClose: () => void;
+}) {
+  const now = new Date();
+  const [viewYear, setViewYear] = useState(now.getFullYear());
+  const [viewMonth, setViewMonth] = useState(now.getMonth());
+  const [start, setStart] = useState<string | null>(null);
+  const [end, setEnd] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (visible) { setStart(value?.start ?? null); setEnd(value?.end ?? null); }
+  }, [visible]);
+
+  const firstDow = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMo = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMo; d++) cells.push(d);
+
+  const shiftMonth = (n: number) => {
+    let m = viewMonth + n, y = viewYear;
+    if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; }
+    setViewMonth(m); setViewYear(y);
+  };
+  const pickDay = (iso: string) => {
+    if (!start || (start && end)) { setStart(iso); setEnd(null); }
+    else if (iso < start) { setEnd(start); setStart(iso); }
+    else setEnd(iso);
+  };
+  const applyPreset = (days: number) => {
+    const e = new Date(); const s = new Date(); s.setDate(s.getDate() - (days - 1));
+    setStart(isoDate(s.getFullYear(), s.getMonth(), s.getDate()));
+    setEnd(isoDate(e.getFullYear(), e.getMonth(), e.getDate()));
+  };
+  const inRange = (iso: string) => !!(start && end && iso > start && iso < end);
+  const rangeLabel = !start ? 'Select a range' : !end ? fmtShort(start) : `${fmtShort(start)} – ${fmtShort(end)}`;
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <TouchableOpacity style={dr.overlay} activeOpacity={1} onPress={onClose}>
+        <TouchableOpacity activeOpacity={1} style={dr.sheet} onPress={() => {}}>
+          <View style={dr.handle} />
+          <View style={dr.header}>
+            <Text style={dr.title}>Custom range</Text>
+            <Text style={[dr.rangeLabel, { color: start ? t.auraAqua : t.text3 }]}>{rangeLabel}</Text>
+          </View>
+          <View style={dr.presets}>
+            {[{ label: 'Last 7 days', days: 7 }, { label: 'Last 30 days', days: 30 }, { label: 'Last 90 days', days: 90 }].map(p => (
+              <TouchableOpacity key={p.days} style={dr.presetChip} onPress={() => applyPreset(p.days)} activeOpacity={0.8}>
+                <Text style={dr.presetText}>{p.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={dr.calHeader}>
+            <TouchableOpacity style={dr.navBtn} onPress={() => shiftMonth(-1)} activeOpacity={0.7}>
+              <Text style={dr.navArrow}>‹</Text>
+            </TouchableOpacity>
+            <Text style={dr.monthLabel}>{MONTHS_LIST[viewMonth]} {viewYear}</Text>
+            <TouchableOpacity style={dr.navBtn} onPress={() => shiftMonth(1)} activeOpacity={0.7}>
+              <Text style={dr.navArrow}>›</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={dr.dowRow}>
+            {DOW_LABELS.map((d, i) => <Text key={i} style={dr.dowLabel}>{d}</Text>)}
+          </View>
+          <View style={dr.calGrid}>
+            {cells.map((d, i) => {
+              if (!d) return <View key={i} style={dr.dayCell} />;
+              const iso = isoDate(viewYear, viewMonth, d);
+              const edge = iso === start || iso === end;
+              const mid = inRange(iso);
+              return (
+                <TouchableOpacity key={i} style={[dr.dayCell, edge && dr.dayCellEdge, mid && dr.dayCellMid]} onPress={() => pickDay(iso)} activeOpacity={0.75}>
+                  <Text style={[dr.dayText, edge && dr.dayTextEdge]}>{d}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <View style={dr.actions}>
+            <TouchableOpacity style={dr.clearBtn} onPress={() => { setStart(null); setEnd(null); }} activeOpacity={0.8}>
+              <Text style={dr.clearText}>Clear</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[dr.applyBtn, !start && { opacity: 0.45 }]} onPress={() => start && onApply({ start, end: end ?? start })} disabled={!start} activeOpacity={0.8}>
+              <Text style={dr.applyText}>Apply</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+const CELL_W: `${number}%` = '14.2857%';
+const dr = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(2,3,8,0.72)', justifyContent: 'flex-end' },
+  sheet: { borderTopLeftRadius: 28, borderTopRightRadius: 28, backgroundColor: 'rgba(14,12,26,0.97)', borderTopWidth: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: t.glassLine2, padding: 20, paddingBottom: 40 },
+  handle: { width: 40, height: 5, borderRadius: 99, backgroundColor: t.glassLine2, alignSelf: 'center', marginBottom: 18 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  title: { fontSize: 17, fontFamily: fonts.semiBold, fontWeight: '600', color: t.text },
+  rangeLabel: { fontSize: 13, fontFamily: fonts.bold, fontWeight: '700' },
+  presets: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 18 },
+  presetChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: t.rPill, backgroundColor: t.glass, borderWidth: 1, borderColor: t.glassLine },
+  presetText: { fontSize: 13, fontFamily: fonts.medium, color: t.text2 },
+  calHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  navBtn: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: t.glass, borderWidth: 1, borderColor: t.glassLine },
+  navArrow: { fontSize: 22, color: t.text2, lineHeight: 28, fontFamily: fonts.regular },
+  monthLabel: { fontSize: 15, fontFamily: fonts.semiBold, fontWeight: '600', color: t.text },
+  dowRow: { flexDirection: 'row', marginBottom: 4 },
+  dowLabel: { width: CELL_W, textAlign: 'center', fontSize: 11, fontFamily: fonts.bold, fontWeight: '700', color: t.text3, paddingVertical: 4 },
+  calGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  dayCell: { width: CELL_W, aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
+  dayCellEdge: { backgroundColor: t.auraAqua, borderRadius: 10 },
+  dayCellMid: { backgroundColor: t.auraAqua + '28', borderRadius: 0 },
+  dayText: { fontSize: 13.5, fontFamily: fonts.medium, color: t.text },
+  dayTextEdge: { fontFamily: fonts.bold, fontWeight: '700', color: '#0b0a1a' },
+  actions: { flexDirection: 'row', gap: 10, marginTop: 18 },
+  clearBtn: { flex: 1, paddingVertical: 14, borderRadius: t.rMd, alignItems: 'center', backgroundColor: t.glass, borderWidth: 1, borderColor: t.glassLine },
+  clearText: { fontSize: 15, fontFamily: fonts.bold, fontWeight: '700', color: t.text2 },
+  applyBtn: { flex: 1.5, paddingVertical: 14, borderRadius: t.rMd, alignItems: 'center', backgroundColor: t.auraIndigo },
+  applyText: { fontSize: 15, fontFamily: fonts.bold, fontWeight: '700', color: '#fff' },
+});
 
 // ── GChip ──
 function GChip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
@@ -216,6 +352,8 @@ export default function AnalyticsScreen() {
   const [userInsightPrompt, setUserInsightPrompt] = useState('');
   const [promptDraft, setPromptDraft] = useState('');
   const [showPromptEditor, setShowPromptEditor] = useState(false);
+  const [customRange, setCustomRange] = useState<DateRange | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const syncAttemptedRef = useRef(false);
 
   const USER_PROMPT_KEY = user?.id ? `insights_user_prompt_${user.id}` : null;
@@ -355,10 +493,14 @@ export default function AnalyticsScreen() {
 
   const periodStart = useMemo(() => getPeriodStart(period), [period]);
 
-  const filteredTransactions = useMemo(
-    () => transactions.filter((tx) => new Date(tx.date) >= periodStart),
-    [transactions, periodStart]
-  );
+  const filteredTransactions = useMemo(() => {
+    if (period === 'custom' && customRange) {
+      const s = new Date(customRange.start);
+      const e = new Date(customRange.end); e.setHours(23, 59, 59, 999);
+      return transactions.filter((tx) => { const d = new Date(tx.date); return d >= s && d <= e; });
+    }
+    return transactions.filter((tx) => new Date(tx.date) >= periodStart);
+  }, [transactions, periodStart, period, customRange]);
 
   const { totalSpent, totalIncome, byCategory, trendData } = useMemo(() => {
     let spent = 0;
@@ -440,6 +582,10 @@ export default function AnalyticsScreen() {
     return { distribution, trend, category };
   }, [donutData, trendChange, byCategory, categories, currencySymbol]);
 
+  const customChipLabel = customRange
+    ? `${fmtShort(customRange.start)} – ${fmtShort(customRange.end)}`
+    : 'Custom';
+
   const periodChips: { key: PeriodOption; label: string }[] = [
     { key: 'week', label: 'This Week' },
     { key: 'month', label: 'This Month' },
@@ -484,6 +630,11 @@ export default function AnalyticsScreen() {
               onPress={() => setPeriod(chip.key)}
             />
           ))}
+          <GChip
+            label={customChipLabel}
+            active={period === 'custom'}
+            onPress={() => setShowDatePicker(true)}
+          />
         </ScrollView>
 
         {/* ── AI Insights (TOP) ── */}
@@ -724,6 +875,17 @@ export default function AnalyticsScreen() {
           AI-generated insights are for informational purposes only and do not constitute financial advice.
         </Text>
       </ScrollView>
+
+      <DateRangePicker
+        visible={showDatePicker}
+        value={customRange}
+        onApply={(range) => {
+          setCustomRange(range);
+          setPeriod('custom');
+          setShowDatePicker(false);
+        }}
+        onClose={() => setShowDatePicker(false)}
+      />
     </View>
   );
 }

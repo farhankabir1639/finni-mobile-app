@@ -11,6 +11,7 @@ import { trackScreen } from '../lib/analytics';
 import { t, fonts } from '../theme/tokens';
 import Aurora from '../components/Aurora';
 import GlassCard from '../components/GlassCard';
+import Orb from '../components/Orb';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -54,6 +55,52 @@ function getAbbr(inv: Investment): string {
   return inv.name.slice(0, 2).toUpperCase();
 }
 
+const PRESET_TYPES = ['stock', 'crypto', 'mutual_fund', 'gold', 'bond', 'real_estate', 'other'];
+
+function AssetTypeCombo({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [query, setQuery] = React.useState(value.replace(/_/g, ' '));
+  const [open, setOpen] = React.useState(false);
+  const matches = PRESET_TYPES.filter(p => p.replace(/_/g, ' ').toLowerCase().includes(query.toLowerCase()));
+  const isExact = PRESET_TYPES.some(p => p.toLowerCase() === query.toLowerCase().replace(/ /g, '_'));
+  const showCustom = query.trim().length > 0 && !isExact;
+
+  const pick = (raw: string) => {
+    onChange(raw);
+    setQuery(raw.replace(/_/g, ' '));
+    setOpen(false);
+  };
+
+  return (
+    <View style={{ zIndex: 10 }}>
+      <TextInput
+        style={[s.formInput, { marginBottom: 0 }]}
+        value={query}
+        onChangeText={(v) => { setQuery(v); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="e.g. stock, crypto, gold…"
+        placeholderTextColor={t.text3}
+        autoCorrect={false}
+        autoCapitalize="none"
+      />
+      {open && (matches.length > 0 || showCustom) && (
+        <View style={s.comboDropdown}>
+          {matches.map(p => (
+            <TouchableOpacity key={p} style={s.comboOption} onPress={() => pick(p)} activeOpacity={0.75}>
+              <Text style={s.comboOptionText}>{p.replace(/_/g, ' ')}</Text>
+            </TouchableOpacity>
+          ))}
+          {showCustom && (
+            <TouchableOpacity style={s.comboOption} onPress={() => pick(query.trim().toLowerCase().replace(/ /g, '_'))} activeOpacity={0.75}>
+              <Text style={[s.comboOptionText, { color: t.auraAqua }]}>Add as custom: "{query.trim()}"</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
 export default function InvestmentsScreen() {
   const { user } = useAuth();
   const { currencySymbol } = useProfile();
@@ -62,6 +109,8 @@ export default function InvestmentsScreen() {
   const [filter, setFilter] = useState<AssetFilter>('all');
   const [showModal, setShowModal] = useState(false);
   const [editingInv, setEditingInv] = useState<Investment | null>(null);
+  const [detailInv, setDetailInv] = useState<Investment | null>(null);
+  const [showDetail, setShowDetail] = useState(false);
 
   // Form state
   const [formName, setFormName] = useState('');
@@ -219,7 +268,7 @@ export default function InvestmentsScreen() {
         {investments.length === 0 ? (
           /* Empty state */
           <View style={s.emptyWrap}>
-            <Text style={{ fontSize: 64, marginBottom: 16 }}>📈</Text>
+            <Orb size={104} rings={false} style={{ marginBottom: 20 }} />
             <Text style={s.emptyTitle}>No investments yet</Text>
             <Text style={s.emptySub}>Add your first holding to start tracking your portfolio</Text>
             <TouchableOpacity style={s.addBtn} onPress={openAdd} activeOpacity={0.8}>
@@ -312,7 +361,7 @@ export default function InvestmentsScreen() {
               const up = value >= cost;
               const color = ASSET_COLORS[inv.asset_type] ?? t.auraBlue;
               return (
-                <TouchableOpacity key={inv.id} onPress={() => openEdit(inv)} onLongPress={() => handleDelete(inv)} activeOpacity={0.7}>
+                <TouchableOpacity key={inv.id} onPress={() => { setDetailInv(inv); setShowDetail(true); }} activeOpacity={0.7}>
                   <GlassCard style={s.holdingCard}>
                     <View style={[s.holdingIcon, { backgroundColor: color + '28', borderColor: color + '45' }]}>
                       <Text style={[s.holdingAbbr, { color }]}>{getAbbr(inv)}</Text>
@@ -349,6 +398,82 @@ export default function InvestmentsScreen() {
         )}
       </ScrollView>
 
+      {/* Holding Detail Sheet */}
+      <Modal visible={showDetail} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setShowDetail(false)}>
+        <View style={s.root}>
+          <Aurora width={SW} height={SH} />
+          {detailInv && (() => {
+            const inv = detailInv;
+            const val = inv.quantity * inv.current_value;
+            const cost = inv.quantity * inv.buy_price;
+            const ret = val - cost;
+            const retPct = cost > 0 ? ((ret / cost) * 100).toFixed(1) : '0.0';
+            const isUp = ret >= 0;
+            const color = ASSET_COLORS[inv.asset_type] ?? t.auraBlue;
+            return (
+              <ScrollView contentContainerStyle={s.detailContent} showsVerticalScrollIndicator={false}>
+                <View style={s.detailIdRow}>
+                  <View style={[s.holdingIcon, { backgroundColor: color + '28', borderColor: color + '45', width: 58, height: 58, borderRadius: 17 }]}>
+                    <Text style={[s.holdingAbbr, { color, fontSize: 19 }]}>{getAbbr(inv)}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.detailName}>{inv.name}</Text>
+                    {inv.ticker ? <Text style={s.detailTicker}>{inv.ticker}</Text> : null}
+                    <Text style={s.detailType}>{ASSET_LABELS[inv.asset_type] ?? inv.asset_type.replace(/_/g, ' ')}</Text>
+                  </View>
+                  <TouchableOpacity style={s.closeBtn} onPress={() => setShowDetail(false)}>
+                    <Text style={s.closeBtnText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <GlassCard style={s.heroCard}>
+                  <Text style={s.eyebrow}>Current Value</Text>
+                  <Text style={s.heroValue}>{currencySymbol}{val.toFixed(0)}</Text>
+                  <View style={[s.changePill, { alignSelf: 'flex-start', marginTop: 10, backgroundColor: isUp ? t.greenTint : t.redTint, borderColor: isUp ? 'rgba(52,211,153,0.3)' : 'rgba(251,113,133,0.3)' }]}>
+                    <Text style={[s.changeText, { color: isUp ? t.green : t.red }]}>
+                      {isUp ? '↑ +' : '↓ '}{retPct}%
+                    </Text>
+                  </View>
+                </GlassCard>
+
+                <Text style={s.sectionTitle}>Your entry</Text>
+                <GlassCard style={s.detailBreakCard}>
+                  {([
+                    { label: 'Quantity', val: String(inv.quantity) },
+                    { label: 'Buy price', val: `${currencySymbol}${inv.buy_price.toFixed(2)}` },
+                    { label: 'Current price', val: `${currencySymbol}${inv.current_value.toFixed(2)}` },
+                    { label: 'Invested', val: `${currencySymbol}${cost.toFixed(0)}` },
+                    { label: 'Value', val: `${currencySymbol}${val.toFixed(0)}` },
+                    { label: 'Return', val: `${isUp ? '+' : ''}${currencySymbol}${ret.toFixed(0)} (${retPct}%)`, color: isUp ? t.green : t.red },
+                  ] as { label: string; val: string; color?: string }[]).map((row, i, arr) => (
+                    <View key={row.label} style={[s.detailRow, i < arr.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.glassLine }]}>
+                      <Text style={s.detailRowLabel}>{row.label}</Text>
+                      <Text style={[s.detailRowVal, row.color ? { color: row.color } : {}]}>{row.val}</Text>
+                    </View>
+                  ))}
+                </GlassCard>
+
+                {inv.notes ? (
+                  <>
+                    <Text style={s.sectionTitle}>Notes</Text>
+                    <GlassCard style={{ padding: 16, marginBottom: 8 }}>
+                      <Text style={s.detailNotes}>{inv.notes}</Text>
+                    </GlassCard>
+                  </>
+                ) : null}
+
+                <TouchableOpacity style={s.saveBtn} onPress={() => { setShowDetail(false); setTimeout(() => openEdit(inv), 250); }} activeOpacity={0.8}>
+                  <Text style={s.saveBtnText}>Edit this holding</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.deleteBtn} onPress={() => { setShowDetail(false); setTimeout(() => handleDelete(inv), 250); }} activeOpacity={0.8}>
+                  <Text style={s.deleteBtnText}>Remove from portfolio</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            );
+          })()}
+        </View>
+      </Modal>
+
       {/* Add/Edit Modal */}
       <Modal visible={showModal} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setShowModal(false)}>
         <View style={s.root}>
@@ -368,17 +493,8 @@ export default function InvestmentsScreen() {
               <TextInput style={s.formInput} placeholder="e.g. GP, BTC" placeholderTextColor={t.text3} value={formTicker} onChangeText={setFormTicker} autoCapitalize="characters" />
 
               <Text style={s.formLabel}>Asset Type</Text>
-              <View style={s.typeRow}>
-                {ASSET_TYPES.map((at) => {
-                  const active = formType === at;
-                  return (
-                    <TouchableOpacity key={at} style={[s.chip, active && s.chipActive, { flex: 1, alignItems: 'center' }]} onPress={() => setFormType(at)} activeOpacity={0.8}>
-                      <Text style={[s.chipText, active && s.chipTextActive, { fontSize: 12 }]}>
-                        {ASSET_LABELS[at] ?? at}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+              <View style={{ marginBottom: 14 }}>
+                <AssetTypeCombo value={formType} onChange={(v) => setFormType(v)} />
               </View>
 
               <Text style={s.formLabel}>Quantity *</Text>
@@ -488,6 +604,32 @@ const s = StyleSheet.create({
   connectIcon: { width: 44, height: 44, borderRadius: 13, backgroundColor: t.cyanTint, alignItems: 'center', justifyContent: 'center' },
   connectTitle: { fontSize: 15, fontFamily: fonts.semiBold, fontWeight: '600', color: t.text },
   connectSub: { fontSize: 13, fontFamily: fonts.medium, color: t.text3, marginTop: 2 },
+
+  // Combo dropdown
+  comboDropdown: {
+    marginTop: 4, borderRadius: t.rMd, backgroundColor: t.glass2,
+    borderWidth: 1, borderColor: t.glassLine2, overflow: 'hidden',
+  },
+  comboOption: {
+    paddingHorizontal: 16, paddingVertical: 13,
+    borderBottomWidth: 1, borderBottomColor: t.glassLine,
+  },
+  comboOptionText: {
+    fontSize: 15, fontFamily: fonts.semiBold, fontWeight: '600', color: t.text,
+    textTransform: 'capitalize',
+  },
+
+  // Detail sheet
+  detailContent: { paddingTop: 64, paddingHorizontal: 22, paddingBottom: 120 },
+  detailIdRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 20 },
+  detailName: { fontSize: 19, fontFamily: fonts.bold, fontWeight: '700', color: t.text, letterSpacing: -0.3 },
+  detailTicker: { fontSize: 13, fontFamily: fonts.semiBold, fontWeight: '600', color: t.text3, marginTop: 2, letterSpacing: 0.5 },
+  detailType: { fontSize: 13, fontFamily: fonts.medium, color: t.text3, marginTop: 3, textTransform: 'capitalize' },
+  detailBreakCard: { padding: 4, marginBottom: 8 },
+  detailRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 13 },
+  detailRowLabel: { fontSize: 14, fontFamily: fonts.medium, color: t.text3 },
+  detailRowVal: { fontSize: 14.5, fontFamily: fonts.bold, fontWeight: '700', color: t.text },
+  detailNotes: { fontSize: 14, fontFamily: fonts.regular, color: t.text2, lineHeight: 21 },
 
   // Modal
   modalHeader: {

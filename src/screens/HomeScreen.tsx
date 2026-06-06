@@ -188,6 +188,7 @@ export default function HomeScreen() {
   // ── Derived ────────────────────────────────────────────────────────────────
   const today           = new Date();
   const monthElapsedPct = Math.round((today.getDate() / daysInMonth(today)) * 100);
+  const monthName       = today.toLocaleString('en-US', { month: 'long' });
   const onTrack         = monthUsedPct <= monthElapsedPct;
   const greeting        = firstName ? `${getGreetingBase()}, ${firstName}` : getGreetingBase();
 
@@ -618,11 +619,39 @@ export default function HomeScreen() {
 
             {/* ArcMeter hero */}
             <View style={styles.arcSection}>
-              <ArcMeter size={200} pct={monthUsedPct} markerPct={monthElapsedPct}>
-                <Orb size={84} rings={false} talking={isTyping} />
-                <Text style={[styles.arcPct, { fontFamily: fonts.extraBold }]}>{monthUsedPct}%</Text>
-                <Text style={[styles.arcSub, { fontFamily: fonts.medium }]}>budget used</Text>
+              <ArcMeter size={244} stroke={13} pct={monthUsedPct} markerPct={monthElapsedPct}>
+                <Orb size={104} rings talking={isTyping} />
               </ArcMeter>
+
+              {/* Big monetary hero */}
+              {monthlyBudget > 0 ? (
+                <>
+                  <Text style={[styles.heroAmount, { fontFamily: fonts.extraBold }]}>
+                    {currencySymbol}{budgetLeft.toFixed(0)}
+                  </Text>
+                  <Text style={[styles.heroSub, { fontFamily: fonts.medium }]}>
+                    left of your {currencySymbol}{monthlyBudget.toFixed(0)} budget
+                  </Text>
+                </>
+              ) : (
+                <Text style={[styles.heroSub, { fontFamily: fonts.medium }]}>
+                  Add income in Settings to track budget
+                </Text>
+              )}
+
+              {/* Legend: % spent + % of month */}
+              {monthlyBudget > 0 && (
+                <View style={styles.legendRow}>
+                  <LinearGradient
+                    colors={[t.auraAqua, '#a5b4fc']}
+                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                    style={styles.legendSwatch}
+                  />
+                  <Text style={[styles.legendText, { fontFamily: fonts.medium }]}>{monthUsedPct}% spent</Text>
+                  <View style={styles.legendWhiteDot} />
+                  <Text style={[styles.legendText, { fontFamily: fonts.medium }]}>{monthElapsedPct}% of {monthName}</Text>
+                </View>
+              )}
 
               {/* Pace pill */}
               <View style={[styles.pacePill, onTrack ? styles.pacePillGreen : styles.pacePillRed]}>
@@ -631,17 +660,6 @@ export default function HomeScreen() {
                   {onTrack ? 'On track' : 'Over pace'}
                 </Text>
               </View>
-
-              {/* Spending context */}
-              {monthlyBudget > 0 ? (
-                <Text style={[styles.budgetLeft, { fontFamily: fonts.medium }]}>
-                  {currencySymbol}{monthSpent.toFixed(0)} spent · {currencySymbol}{budgetLeft.toFixed(0)} left
-                </Text>
-              ) : (
-                <Text style={[styles.budgetLeft, { fontFamily: fonts.medium }]}>
-                  Add income in Settings to track budget
-                </Text>
-              )}
             </View>
 
             {/* Finni noticed card */}
@@ -822,16 +840,21 @@ const styles = StyleSheet.create({
   dateText: { fontSize: 13, color: t.text3, marginTop: 2 },
   historyBtn: { padding: 6 },
 
-  arcSection: { alignItems: 'center', gap: 12, marginBottom: 12 },
-  arcPct: { fontSize: 26, color: t.text, letterSpacing: -0.5 },
-  arcSub: { fontSize: 12, color: t.text3, marginTop: -2 },
+  arcSection: { alignItems: 'center', gap: 10, marginBottom: 12 },
+
+  heroAmount: { fontSize: 33, color: t.text, letterSpacing: -0.8, lineHeight: 36 },
+  heroSub: { fontSize: 13.5, color: t.text2, marginTop: -2 },
+
+  legendRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: -2 },
+  legendSwatch: { width: 14, height: 14, borderRadius: 4 },
+  legendWhiteDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#fff', marginLeft: 4, shadowColor: '#fff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.9, shadowRadius: 4 },
+  legendText: { fontSize: 12.5, color: t.text3 },
 
   pacePill: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 14, paddingVertical: 7, borderRadius: t.rPill, borderWidth: 1 },
   pacePillGreen: { backgroundColor: t.greenTint, borderColor: 'rgba(52,211,153,0.3)' },
   pacePillRed: { backgroundColor: t.redTint, borderColor: 'rgba(251,113,133,0.3)' },
   paceDot: { width: 7, height: 7, borderRadius: 4 },
   paceText: { fontSize: 13 },
-  budgetLeft: { fontSize: 13, color: t.text3 },
 
   noticedWrap: { marginTop: 8 },
   noticedCard: { padding: 14 },

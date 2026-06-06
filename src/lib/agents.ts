@@ -95,6 +95,7 @@ async function callGeminiWithHistory(
         method: 'POST',
         headers,
         body: JSON.stringify({
+          model: GEMINI_MODEL,
           contents,
           generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
         }),
