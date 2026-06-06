@@ -32,7 +32,7 @@ function resolveCategoryFuzzy(
 
 // Legacy client-side key — used as fallback during migration, removed in Phase 3
 const GEMINI_API_KEY_LEGACY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-const GEMINI_MODEL = 'gemini-2.0-flash-lite';
+const GEMINI_MODEL = 'gemini-2.5-flash';
 const GEMINI_PROXY_URL = supabaseUrl ? `${supabaseUrl}/functions/v1/gemini-proxy` : null;
 const GEMINI_DIRECT_URL = GEMINI_API_KEY_LEGACY
   ? `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY_LEGACY}`
