@@ -1,89 +1,6 @@
-import React, { useEffect, useRef } from 'react';
-import { Animated, View, StyleSheet, Platform } from 'react-native';
+import React from 'react';
+import { View, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { t } from '../theme/tokens';
-
-interface BlobConfig {
-  color: string;
-  size: number;
-  topPct: number;
-  leftPct: number;
-  driftX: number;
-  driftY: number;
-  duration: number;
-  opacity: number;
-}
-
-const BLOBS: BlobConfig[] = [
-  { color: t.auraViolet, size: 460, topPct: -0.06, leftPct: -0.12, driftX: 30,  driftY: -18, duration: 18000, opacity: 0.08 },
-  { color: t.auraIndigo, size: 500, topPct:  0.20, leftPct:  0.52, driftX: -28, driftY:  24, duration: 22000, opacity: 0.07 },
-  { color: t.auraAqua,   size: 380, topPct:  0.54, leftPct: -0.10, driftX:  20, driftY: -14, duration: 26000, opacity: 0.04 },
-  { color: t.auraRose,   size: 340, topPct:  0.66, leftPct:  0.58, driftX: -16, driftY:  18, duration: 24000, opacity: 0.03 },
-  { color: t.auraBlue,   size: 340, topPct:  0.38, leftPct:  0.22, driftX:  22, driftY: -10, duration: 20000, opacity: 0.04 },
-];
-
-function AuroraBlob({ blob, screenWidth, screenHeight }: {
-  blob: BlobConfig;
-  screenWidth: number;
-  screenHeight: number;
-}) {
-  const anim = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
-  // On Android: keep static, suppress further to avoid visible circle artifacts
-  const displayOpacity = Platform.OS === 'android' ? blob.opacity * 0.3 : blob.opacity;
-
-  useEffect(() => {
-    // Skip complex animations on Android for performance
-    if (Platform.OS === 'android') return;
-
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(anim, {
-          toValue: { x: blob.driftX, y: blob.driftY },
-          duration: blob.duration,
-          useNativeDriver: true,
-        }),
-        Animated.timing(anim, {
-          toValue: { x: -blob.driftX * 0.6, y: blob.driftY * 0.5 },
-          duration: blob.duration * 0.8,
-          useNativeDriver: true,
-        }),
-        Animated.timing(anim, {
-          toValue: { x: 0, y: 0 },
-          duration: blob.duration * 0.7,
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, []);
-
-  const top = screenHeight * blob.topPct - blob.size / 2;
-  const left = screenWidth * blob.leftPct - blob.size / 2;
-
-  return (
-    <Animated.View
-      style={[
-        styles.blobOuter,
-        {
-          width: blob.size,
-          height: blob.size,
-          top,
-          left,
-          opacity: displayOpacity,
-          transform: [{ translateX: anim.x }, { translateY: anim.y }],
-        },
-      ]}
-    >
-      <LinearGradient
-        colors={[blob.color, blob.color + '28', 'transparent']}
-        style={{ width: blob.size, height: blob.size, borderRadius: blob.size / 2 }}
-        start={{ x: 0.5, y: 0.5 }}
-        end={{ x: 1, y: 1 }}
-      />
-    </Animated.View>
-  );
-}
 
 interface AuroraProps {
   width: number;
@@ -92,70 +9,21 @@ interface AuroraProps {
 
 export default function Aurora({ width, height }: AuroraProps) {
   return (
-    <View style={[StyleSheet.absoluteFillObject, styles.container]} pointerEvents="none">
-      {/* deep background gradient */}
+    <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+      {/* Deep base — matches #07070E from design */}
       <LinearGradient
-        colors={['#0d0d1c', '#07070e', '#050509']}
+        colors={['#0e0c1e', '#08071a', '#07070e']}
         style={StyleSheet.absoluteFillObject}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
+        start={{ x: 0.3, y: 0 }}
+        end={{ x: 0.7, y: 1 }}
       />
-
-      {/* animated colour blobs */}
-      {BLOBS.map((blob, i) => (
-        <AuroraBlob key={i} blob={blob} screenWidth={width} screenHeight={height} />
-      ))}
-
-      {/* star dust — static tiny dots */}
-      {STARS.map((s, i) => (
-        <View
-          key={i}
-          style={[
-            styles.star,
-            { top: s.top * height, left: s.left * width, opacity: s.opacity },
-          ]}
-        />
-      ))}
-
-      {/* grain veil — calms saturation */}
+      {/* Subtle violet haze at top-left — the only color in the prototype bg */}
       <LinearGradient
-        colors={['rgba(7,7,14,0.22)', 'rgba(7,7,14,0.60)']}
-        style={StyleSheet.absoluteFillObject}
+        colors={['rgba(99,60,180,0.13)', 'transparent']}
+        style={[StyleSheet.absoluteFillObject, { height: height * 0.45 }]}
         start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
+        end={{ x: 0.6, y: 1 }}
       />
-      {/* Android extra suppression — static blobs can look harsh without motion blur */}
-      {Platform.OS === 'android' && (
-        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(7,7,14,0.40)' }]} />
-      )}
     </View>
   );
 }
-
-// Pre-computed static star positions
-const STARS = [
-  { top: 0.30, left: 0.20, opacity: 0.5 },
-  { top: 0.20, left: 0.70, opacity: 0.5 },
-  { top: 0.70, left: 0.40, opacity: 0.5 },
-  { top: 0.60, left: 0.85, opacity: 0.4 },
-  { top: 0.45, left: 0.55, opacity: 0.4 },
-  { top: 0.80, left: 0.15, opacity: 0.4 },
-  { top: 0.12, left: 0.45, opacity: 0.35 },
-  { top: 0.55, left: 0.28, opacity: 0.35 },
-];
-
-const styles = StyleSheet.create({
-  container: {
-    overflow: 'hidden',
-  },
-  blobOuter: {
-    position: 'absolute',
-  },
-  star: {
-    position: 'absolute',
-    width: 2,
-    height: 2,
-    borderRadius: 1,
-    backgroundColor: '#ffffff',
-  },
-});
