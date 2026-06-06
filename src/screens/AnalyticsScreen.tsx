@@ -387,9 +387,11 @@ export default function AnalyticsScreen() {
     try {
       await clearAgentCache(user.id);
       const now = new Date();
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      // Use last 90 days so insights have rich context even for slow months
+      const ninetyDaysAgo = new Date(now);
+      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 89);
       const monthTx = transactions
-        .filter((tx) => new Date(tx.date) >= startOfMonth)
+        .filter((tx) => new Date(tx.date) >= ninetyDaysAgo)
         .map((tx) => ({ ...tx, category: tx.category ?? null }));
 
       const [freshInsights, freshSavings] = await Promise.all([
@@ -485,7 +487,7 @@ export default function AnalyticsScreen() {
   useFocusEffect(useCallback(() => { fetchAll(); trackScreen('AnalyticsScreen'); }, [fetchAll]));
 
   useEffect(() => {
-    if (transactions.length >= 10 && user?.id && !syncAttemptedRef.current) {
+    if (transactions.length >= 1 && user?.id && !syncAttemptedRef.current) {
       syncAttemptedRef.current = true;
       syncInsights();
     }
@@ -584,7 +586,15 @@ export default function AnalyticsScreen() {
 
   const customChipLabel = customRange
     ? `${fmtShort(customRange.start)} – ${fmtShort(customRange.end)}`
-    : 'Custom';
+    : '📅 Custom';
+
+  const donutCenterSub = (() => {
+    if (period === 'custom' && customRange) return `${fmtShort(customRange.start)} – ${fmtShort(customRange.end)}`;
+    if (period === 'week') return 'this week';
+    if (period === '3months') return 'last 3 months';
+    if (period === 'year') return 'this year';
+    return 'this month';
+  })();
 
   const periodChips: { key: PeriodOption; label: string }[] = [
     { key: 'week', label: 'This Week' },
@@ -650,11 +660,11 @@ export default function AnalyticsScreen() {
           )}
         </View>
 
-        {transactions.length < 10 ? (
+        {transactions.length < 1 ? (
           <GlassCard style={s.insightCard}>
             <Text style={[s.insightTitle, { color: t.auraAqua }]}>Building your insights...</Text>
             <Text style={s.insightBody}>
-              Finni needs at least 10 transactions to generate personalized insights. You have {transactions.length} so far — keep logging!
+              Add your first transaction and Finni will start analyzing your spending patterns.
             </Text>
           </GlassCard>
         ) : insightsLoading && insights.length === 0 ? (
@@ -714,7 +724,7 @@ export default function AnalyticsScreen() {
         )}
 
         {/* Refresh / Customize row */}
-        {transactions.length >= 10 && (
+        {transactions.length >= 1 && (
           <View style={s.actionRow}>
             <TouchableOpacity
               style={s.ghostBtn}
@@ -780,7 +790,7 @@ export default function AnalyticsScreen() {
                 data={donutData}
                 size={180}
                 centerLabel={`${currencySymbol}${totalSpent.toFixed(0)}`}
-                centerSub="this month"
+                centerSub={donutCenterSub}
               />
             </View>
             {/* Legend */}

@@ -15,11 +15,11 @@ interface BlobConfig {
 }
 
 const BLOBS: BlobConfig[] = [
-  { color: t.auraViolet, size: 320, topPct: -0.06, leftPct: -0.12, driftX: 30,  driftY: -18, duration: 18000, opacity: 0.16 },
-  { color: t.auraIndigo, size: 360, topPct:  0.20, leftPct:  0.52, driftX: -28, driftY:  24, duration: 22000, opacity: 0.14 },
-  { color: t.auraAqua,   size: 260, topPct:  0.54, leftPct: -0.10, driftX:  20, driftY: -14, duration: 26000, opacity: 0.09 },
-  { color: t.auraRose,   size: 230, topPct:  0.66, leftPct:  0.58, driftX: -16, driftY:  18, duration: 24000, opacity: 0.07 },
-  { color: t.auraBlue,   size: 220, topPct:  0.38, leftPct:  0.22, driftX:  22, driftY: -10, duration: 20000, opacity: 0.08 },
+  { color: t.auraViolet, size: 460, topPct: -0.06, leftPct: -0.12, driftX: 30,  driftY: -18, duration: 18000, opacity: 0.08 },
+  { color: t.auraIndigo, size: 500, topPct:  0.20, leftPct:  0.52, driftX: -28, driftY:  24, duration: 22000, opacity: 0.07 },
+  { color: t.auraAqua,   size: 380, topPct:  0.54, leftPct: -0.10, driftX:  20, driftY: -14, duration: 26000, opacity: 0.04 },
+  { color: t.auraRose,   size: 340, topPct:  0.66, leftPct:  0.58, driftX: -16, driftY:  18, duration: 24000, opacity: 0.03 },
+  { color: t.auraBlue,   size: 340, topPct:  0.38, leftPct:  0.22, driftX:  22, driftY: -10, duration: 20000, opacity: 0.04 },
 ];
 
 function AuroraBlob({ blob, screenWidth, screenHeight }: {
@@ -28,6 +28,8 @@ function AuroraBlob({ blob, screenWidth, screenHeight }: {
   screenHeight: number;
 }) {
   const anim = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  // On Android: keep static, suppress further to avoid visible circle artifacts
+  const displayOpacity = Platform.OS === 'android' ? blob.opacity * 0.3 : blob.opacity;
 
   useEffect(() => {
     // Skip complex animations on Android for performance
@@ -68,13 +70,13 @@ function AuroraBlob({ blob, screenWidth, screenHeight }: {
           height: blob.size,
           top,
           left,
-          opacity: blob.opacity,
+          opacity: displayOpacity,
           transform: [{ translateX: anim.x }, { translateY: anim.y }],
         },
       ]}
     >
       <LinearGradient
-        colors={[blob.color, 'transparent']}
+        colors={[blob.color, blob.color + '28', 'transparent']}
         style={{ width: blob.size, height: blob.size, borderRadius: blob.size / 2 }}
         start={{ x: 0.5, y: 0.5 }}
         end={{ x: 1, y: 1 }}
@@ -117,11 +119,15 @@ export default function Aurora({ width, height }: AuroraProps) {
 
       {/* grain veil — calms saturation */}
       <LinearGradient
-        colors={['rgba(7,7,14,0.18)', 'rgba(7,7,14,0.50)']}
+        colors={['rgba(7,7,14,0.22)', 'rgba(7,7,14,0.60)']}
         style={StyleSheet.absoluteFillObject}
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
       />
+      {/* Android extra suppression — static blobs can look harsh without motion blur */}
+      {Platform.OS === 'android' && (
+        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(7,7,14,0.40)' }]} />
+      )}
     </View>
   );
 }
