@@ -15,7 +15,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCalendars } from 'expo-localization';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Path, Circle, Line, Polyline } from 'react-native-svg';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfile } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
@@ -34,6 +34,8 @@ import GlassCard from '../components/GlassCard';
 import GlowDonut from '../components/GlowDonut';
 import TrendArea from '../components/TrendArea';
 import Orb from '../components/Orb';
+import CatIconComponent from '../components/CatIcon';
+import DateRangePicker, { type DateRange, fmtShort } from '../components/DateRangePicker';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -52,16 +54,6 @@ function getCatColor(name: string): string {
   return CAT_COLORS[key] ?? t.catUncat;
 }
 
-const CATEGORY_EMOJI: Record<string, string> = {
-  food: '🍔', transport: '🚗', shopping: '🛒', entertainment: '🎬',
-  bills: '📄', groceries: '🛒', dining: '🍽️', coffee: '☕',
-  travel: '✈️', health: '💊', default: '💰',
-};
-
-function getCategoryEmoji(category: string | null): string {
-  if (!category) return CATEGORY_EMOJI.default;
-  return CATEGORY_EMOJI[category.toLowerCase().replace(/\s+/g, '')] ?? CATEGORY_EMOJI.default;
-}
 
 // ── Types ──
 type Transaction = {
@@ -78,7 +70,6 @@ type Transaction = {
 
 type CategoryTotal = { name: string; amount: number };
 type PeriodOption = 'week' | 'month' | '3months' | 'year' | 'custom';
-type DateRange = { start: string; end: string };
 
 // ── Helpers ──
 function getPeriodStart(period: PeriodOption): Date {
@@ -122,12 +113,128 @@ const INSIGHT_TONE: Record<string, string> = {
   income_alert: t.red,
 };
 
-const INSIGHT_ICON: Record<string, string> = {
-  warning: 'alert',
-  tip: 'wallet',
-  goal: 'target',
-  income_alert: 'alert',
-};
+// Keyword → icon key. Runs over the full insight text so the icon reflects
+// the actual subject (e.g. "homeownership" → house) rather than just the type tag.
+function resolveInsightIcon(title: string, body: string, type: string): string {
+  const text = `${title} ${body}`.toLowerCase();
+  if (/home|house|rent|mortgage|homeown|property/.test(text)) return 'home';
+  if (/health|doctor|medicine|pharma|gym|fitness|medical/.test(text)) return 'health';
+  if (/food|dining|restaurant|coffee|grocer|meal|lunch|dinner|snack/.test(text)) return 'food';
+  if (/transport|uber|grab|taxi|fuel|petrol|car|bus|train|commut/.test(text)) return 'transport';
+  if (/shop|amazon|cloth|mall|retail/.test(text)) return 'shopping';
+  if (/entertain|netflix|spotify|cinema|movie|stream/.test(text)) return 'entertainment';
+  if (/income|salary|earn|wage|revenue/.test(text) && type !== 'income_alert') return 'trending_up';
+  if (/bill|electric|water|utility|internet|subscri/.test(text)) return 'bills';
+  return type; // fallback: warning | tip | goal | income_alert
+}
+
+function InsightIcon({ iconKey, color }: { iconKey: string; color: string }) {
+  const sw = 1.8;
+  const lc = 'round' as const;
+  const lj = 'round' as const;
+  const base = { stroke: color, strokeWidth: sw, strokeLinecap: lc, strokeLinejoin: lj, fill: 'none' } as const;
+
+  switch (iconKey) {
+    case 'warning': return (
+      <Svg width={18} height={18} viewBox="0 0 24 24">
+        <Path {...base} d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+        <Line x1="12" y1="9" x2="12" y2="13" stroke={color} strokeWidth={sw} strokeLinecap={lc} />
+        <Line x1="12" y1="17" x2="12.01" y2="17" stroke={color} strokeWidth={2.5} strokeLinecap={lc} />
+      </Svg>
+    );
+    case 'goal': return (
+      <Svg width={18} height={18} viewBox="0 0 24 24">
+        <Circle cx="12" cy="12" r="10" stroke={color} strokeWidth={sw} fill="none" />
+        <Circle cx="12" cy="12" r="6"  stroke={color} strokeWidth={sw} fill="none" />
+        <Circle cx="12" cy="12" r="2"  stroke={color} strokeWidth={sw} fill={color} />
+      </Svg>
+    );
+    case 'income_alert': return (
+      <Svg width={18} height={18} viewBox="0 0 24 24">
+        <Polyline points="23,18 13.5,8.5 8.5,13.5 1,6" {...base} />
+        <Polyline points="17,18 23,18 23,12" {...base} />
+      </Svg>
+    );
+    case 'home': return (
+      <Svg width={18} height={18} viewBox="0 0 24 24">
+        <Path {...base} d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+        <Polyline points="9,22 9,12 15,12 15,22" {...base} />
+      </Svg>
+    );
+    case 'health': return (
+      <Svg width={18} height={18} viewBox="0 0 24 24">
+        <Path {...base} d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+      </Svg>
+    );
+    case 'food': return (
+      <Svg width={18} height={18} viewBox="0 0 24 24">
+        <Path {...base} d="M18 8h1a4 4 0 0 1 0 8h-1" />
+        <Path {...base} d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z" />
+        <Line x1="6" y1="1" x2="6" y2="4" stroke={color} strokeWidth={sw} strokeLinecap={lc} />
+        <Line x1="10" y1="1" x2="10" y2="4" stroke={color} strokeWidth={sw} strokeLinecap={lc} />
+        <Line x1="14" y1="1" x2="14" y2="4" stroke={color} strokeWidth={sw} strokeLinecap={lc} />
+      </Svg>
+    );
+    case 'transport': return (
+      <Svg width={18} height={18} viewBox="0 0 24 24">
+        <Path {...base} d="M5 17H3a2 2 0 0 1-2-2V9l2.5-6h15L21 9v6a2 2 0 0 1-2 2h-2" />
+        <Circle cx="7.5" cy="17.5" r="2.5" stroke={color} strokeWidth={sw} fill="none" />
+        <Circle cx="16.5" cy="17.5" r="2.5" stroke={color} strokeWidth={sw} fill="none" />
+      </Svg>
+    );
+    case 'shopping': return (
+      <Svg width={18} height={18} viewBox="0 0 24 24">
+        <Path {...base} d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+        <Line x1="3" y1="6" x2="21" y2="6" stroke={color} strokeWidth={sw} strokeLinecap={lc} />
+        <Path {...base} d="M16 10a4 4 0 0 1-8 0" />
+      </Svg>
+    );
+    case 'entertainment': return (
+      <Svg width={18} height={18} viewBox="0 0 24 24">
+        <Circle cx="12" cy="12" r="10" stroke={color} strokeWidth={sw} fill="none" />
+        <Polyline points="10,8 16,12 10,16 10,8" {...base} />
+      </Svg>
+    );
+    case 'trending_up': return (
+      <Svg width={18} height={18} viewBox="0 0 24 24">
+        <Polyline points="23,6 13.5,15.5 8.5,10.5 1,18" {...base} />
+        <Polyline points="17,6 23,6 23,12" {...base} />
+      </Svg>
+    );
+    case 'bills': return (
+      <Svg width={18} height={18} viewBox="0 0 24 24">
+        <Path {...base} d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <Polyline points="14,2 14,8 20,8" {...base} />
+        <Line x1="9" y1="13" x2="15" y2="13" stroke={color} strokeWidth={sw} strokeLinecap={lc} />
+        <Line x1="9" y1="17" x2="15" y2="17" stroke={color} strokeWidth={sw} strokeLinecap={lc} />
+      </Svg>
+    );
+    case 'savings': return (
+      <Svg width={18} height={18} viewBox="0 0 24 24">
+        <Circle cx="12" cy="12" r="9" stroke={color} strokeWidth={sw} fill="none" />
+        <Path d="M12 7v10M9 11l3-3 3 3" {...base} />
+      </Svg>
+    );
+    default: return ( // tip — zap bolt
+      <Svg width={18} height={18} viewBox="0 0 24 24">
+        <Path {...base} d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+      </Svg>
+    );
+  }
+}
+
+function SavingsIcon({ color }: { color: string }) {
+  const sw = 1.8;
+  const lc = 'round' as const;
+  const lj = 'round' as const;
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24">
+      <Circle cx="12" cy="12" r="9" stroke={color} strokeWidth={sw} fill="none" />
+      <Path d="M12 7v10M9 11l3-3 3 3"
+        stroke={color} strokeWidth={sw} strokeLinecap={lc} strokeLinejoin={lj} fill="none" />
+    </Svg>
+  );
+}
 
 // ── Chart Insight component (mini-insight below charts) ──
 function ChartInsight({ text, tone }: { text: string; tone: string }) {
@@ -145,139 +252,6 @@ function ChartInsight({ text, tone }: { text: string; tone: string }) {
   );
 }
 
-// ── DateRangePicker ──
-const MONTHS_LIST = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const DOW_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-
-function isoDate(y: number, m: number, d: number) {
-  return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-}
-function fmtShort(iso: string) {
-  const [, m, d] = iso.split('-').map(Number);
-  return `${MONTHS_LIST[m - 1].slice(0, 3)} ${d}`;
-}
-
-function DateRangePicker({ visible, value, onApply, onClose }: {
-  visible: boolean; value: DateRange | null;
-  onApply: (r: DateRange) => void; onClose: () => void;
-}) {
-  const now = new Date();
-  const [viewYear, setViewYear] = useState(now.getFullYear());
-  const [viewMonth, setViewMonth] = useState(now.getMonth());
-  const [start, setStart] = useState<string | null>(null);
-  const [end, setEnd] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (visible) { setStart(value?.start ?? null); setEnd(value?.end ?? null); }
-  }, [visible]);
-
-  const firstDow = new Date(viewYear, viewMonth, 1).getDay();
-  const daysInMo = new Date(viewYear, viewMonth + 1, 0).getDate();
-  const cells: (number | null)[] = [];
-  for (let i = 0; i < firstDow; i++) cells.push(null);
-  for (let d = 1; d <= daysInMo; d++) cells.push(d);
-
-  const shiftMonth = (n: number) => {
-    let m = viewMonth + n, y = viewYear;
-    if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; }
-    setViewMonth(m); setViewYear(y);
-  };
-  const pickDay = (iso: string) => {
-    if (!start || (start && end)) { setStart(iso); setEnd(null); }
-    else if (iso < start) { setEnd(start); setStart(iso); }
-    else setEnd(iso);
-  };
-  const applyPreset = (days: number) => {
-    const e = new Date(); const s = new Date(); s.setDate(s.getDate() - (days - 1));
-    setStart(isoDate(s.getFullYear(), s.getMonth(), s.getDate()));
-    setEnd(isoDate(e.getFullYear(), e.getMonth(), e.getDate()));
-  };
-  const inRange = (iso: string) => !!(start && end && iso > start && iso < end);
-  const rangeLabel = !start ? 'Select a range' : !end ? fmtShort(start) : `${fmtShort(start)} – ${fmtShort(end)}`;
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={dr.overlay} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity activeOpacity={1} style={dr.sheet} onPress={() => {}}>
-          <View style={dr.handle} />
-          <View style={dr.header}>
-            <Text style={dr.title}>Custom range</Text>
-            <Text style={[dr.rangeLabel, { color: start ? t.auraAqua : t.text3 }]}>{rangeLabel}</Text>
-          </View>
-          <View style={dr.presets}>
-            {[{ label: 'Last 7 days', days: 7 }, { label: 'Last 30 days', days: 30 }, { label: 'Last 90 days', days: 90 }].map(p => (
-              <TouchableOpacity key={p.days} style={dr.presetChip} onPress={() => applyPreset(p.days)} activeOpacity={0.8}>
-                <Text style={dr.presetText}>{p.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          <View style={dr.calHeader}>
-            <TouchableOpacity style={dr.navBtn} onPress={() => shiftMonth(-1)} activeOpacity={0.7}>
-              <Text style={dr.navArrow}>‹</Text>
-            </TouchableOpacity>
-            <Text style={dr.monthLabel}>{MONTHS_LIST[viewMonth]} {viewYear}</Text>
-            <TouchableOpacity style={dr.navBtn} onPress={() => shiftMonth(1)} activeOpacity={0.7}>
-              <Text style={dr.navArrow}>›</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={dr.dowRow}>
-            {DOW_LABELS.map((d, i) => <Text key={i} style={dr.dowLabel}>{d}</Text>)}
-          </View>
-          <View style={dr.calGrid}>
-            {cells.map((d, i) => {
-              if (!d) return <View key={i} style={dr.dayCell} />;
-              const iso = isoDate(viewYear, viewMonth, d);
-              const edge = iso === start || iso === end;
-              const mid = inRange(iso);
-              return (
-                <TouchableOpacity key={i} style={[dr.dayCell, edge && dr.dayCellEdge, mid && dr.dayCellMid]} onPress={() => pickDay(iso)} activeOpacity={0.75}>
-                  <Text style={[dr.dayText, edge && dr.dayTextEdge]}>{d}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-          <View style={dr.actions}>
-            <TouchableOpacity style={dr.clearBtn} onPress={() => { setStart(null); setEnd(null); }} activeOpacity={0.8}>
-              <Text style={dr.clearText}>Clear</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[dr.applyBtn, !start && { opacity: 0.45 }]} onPress={() => start && onApply({ start, end: end ?? start })} disabled={!start} activeOpacity={0.8}>
-              <Text style={dr.applyText}>Apply</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </TouchableOpacity>
-    </Modal>
-  );
-}
-const CELL_W: `${number}%` = '14.2857%';
-const dr = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(2,3,8,0.72)', justifyContent: 'flex-end' },
-  sheet: { borderTopLeftRadius: 28, borderTopRightRadius: 28, backgroundColor: 'rgba(14,12,26,0.97)', borderTopWidth: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: t.glassLine2, padding: 20, paddingBottom: 40 },
-  handle: { width: 40, height: 5, borderRadius: 99, backgroundColor: t.glassLine2, alignSelf: 'center', marginBottom: 18 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  title: { fontSize: 17, fontFamily: fonts.semiBold, fontWeight: '600', color: t.text },
-  rangeLabel: { fontSize: 13, fontFamily: fonts.bold, fontWeight: '700' },
-  presets: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 18 },
-  presetChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: t.rPill, backgroundColor: t.glass, borderWidth: 1, borderColor: t.glassLine },
-  presetText: { fontSize: 13, fontFamily: fonts.medium, color: t.text2 },
-  calHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
-  navBtn: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: t.glass, borderWidth: 1, borderColor: t.glassLine },
-  navArrow: { fontSize: 22, color: t.text2, lineHeight: 28, fontFamily: fonts.regular },
-  monthLabel: { fontSize: 15, fontFamily: fonts.semiBold, fontWeight: '600', color: t.text },
-  dowRow: { flexDirection: 'row', marginBottom: 4 },
-  dowLabel: { width: CELL_W, textAlign: 'center', fontSize: 11, fontFamily: fonts.bold, fontWeight: '700', color: t.text3, paddingVertical: 4 },
-  calGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-  dayCell: { width: CELL_W, aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
-  dayCellEdge: { backgroundColor: t.auraAqua, borderRadius: 10 },
-  dayCellMid: { backgroundColor: t.auraAqua + '28', borderRadius: 0 },
-  dayText: { fontSize: 13.5, fontFamily: fonts.medium, color: t.text },
-  dayTextEdge: { fontFamily: fonts.bold, fontWeight: '700', color: '#0b0a1a' },
-  actions: { flexDirection: 'row', gap: 10, marginTop: 18 },
-  clearBtn: { flex: 1, paddingVertical: 14, borderRadius: t.rMd, alignItems: 'center', backgroundColor: t.glass, borderWidth: 1, borderColor: t.glassLine },
-  clearText: { fontSize: 15, fontFamily: fonts.bold, fontWeight: '700', color: t.text2 },
-  applyBtn: { flex: 1.5, paddingVertical: 14, borderRadius: t.rMd, alignItems: 'center', backgroundColor: t.auraIndigo },
-  applyText: { fontSize: 15, fontFamily: fonts.bold, fontWeight: '700', color: '#fff' },
-});
 
 // ── GChip ──
 function GChip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
@@ -287,13 +261,13 @@ function GChip({ label, active, onPress }: { label: string; active: boolean; onP
       activeOpacity={0.8}
       style={[s.chip, active && s.chipActive]}
     >
-      <Text style={[s.chipText, active && s.chipTextActive]}>{label}</Text>
+      <Text allowFontScaling={false} style={[s.chipText, active && s.chipTextActive]}>{label}</Text>
     </TouchableOpacity>
   );
 }
 
-// ── Bar component ──
-function Bar({ pct, color, height = 5, delay = 0 }: { pct: number; color: string; height?: number; delay?: number }) {
+// ── Bar component with glow ──
+function Bar({ pct, color, height = 6 }: { pct: number; color: string; height?: number; delay?: number }) {
   return (
     <View style={[s.barTrack, { height }]}>
       <View
@@ -303,31 +277,14 @@ function Bar({ pct, color, height = 5, delay = 0 }: { pct: number; color: string
             width: `${Math.min(100, pct)}%`,
             height,
             backgroundColor: color,
+            shadowColor: color,
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.85,
+            shadowRadius: 6,
+            elevation: 6,
           },
         ]}
       />
-    </View>
-  );
-}
-
-// ── CatIcon ──
-function CatIcon({ name, size = 36, radius = 11 }: { name: string; size?: number; radius?: number }) {
-  const color = getCatColor(name);
-  const emoji = getCategoryEmoji(name);
-  return (
-    <View
-      style={{
-        width: size,
-        height: size,
-        borderRadius: radius,
-        backgroundColor: color + '28',
-        borderWidth: 1,
-        borderColor: color + '45',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <Text style={{ fontSize: size * 0.44 }}>{emoji}</Text>
     </View>
   );
 }
@@ -354,10 +311,16 @@ export default function AnalyticsScreen() {
   const [showPromptEditor, setShowPromptEditor] = useState(false);
   const [customRange, setCustomRange] = useState<DateRange | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [selectedInsight, setSelectedInsight] = useState<{
+    title: string; body: string; color: string; iconKey: string; insType: string; potentialSavings?: string;
+  } | null>(null);
+  const [insightFeedback, setInsightFeedback] = useState<Record<string, 'like' | 'dislike' | 'report'>>({});
+  const [refreshedToday, setRefreshedToday] = useState(false);
   const syncAttemptedRef = useRef(false);
 
   const USER_PROMPT_KEY = user?.id ? `insights_user_prompt_${user.id}` : null;
   const USER_PROMPT_MAX = 250;
+  const REFRESH_DATE_KEY = user?.id ? `insights_manual_refresh_date_${user.id}` : null;
 
   useEffect(() => {
     if (!USER_PROMPT_KEY) return;
@@ -365,6 +328,30 @@ export default function AnalyticsScreen() {
       if (val) { setUserInsightPrompt(val); setPromptDraft(val); }
     });
   }, [USER_PROMPT_KEY]);
+
+  useEffect(() => {
+    if (!REFRESH_DATE_KEY) return;
+    const tz = getCalendars()[0]?.timeZone ?? 'UTC';
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: tz });
+    AsyncStorage.getItem(REFRESH_DATE_KEY).then((val) => setRefreshedToday(val === today));
+  }, [REFRESH_DATE_KEY]);
+
+  // Load persisted feedback so icons reflect prior ratings after reload
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase
+      .from('insight_feedback')
+      .select('insight_title, feedback_type')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(50)
+      .then(({ data }) => {
+        if (!data) return;
+        const map: Record<string, 'like' | 'dislike' | 'report'> = {};
+        data.forEach((r) => { map[r.insight_title] = r.feedback_type as 'like' | 'dislike' | 'report'; });
+        setInsightFeedback(map);
+      });
+  }, [user?.id]);
 
   const saveUserPrompt = async () => {
     if (!USER_PROMPT_KEY) return;
@@ -375,11 +362,30 @@ export default function AnalyticsScreen() {
     setShowPromptEditor(false);
   };
 
-  const fetchAndCacheInsights = useCallback(async () => {
+  const submitFeedback = useCallback(async (insightTitle: string, feedbackType: 'like' | 'dislike' | 'report') => {
+    if (!user?.id) return;
+    setInsightFeedback((prev) => ({ ...prev, [insightTitle]: feedbackType }));
+    await supabase.from('insight_feedback').upsert(
+      { user_id: user.id, insight_title: insightTitle, feedback_type: feedbackType },
+      { onConflict: 'user_id,insight_title' }
+    );
+  }, [user?.id]);
+
+  const fetchAndCacheInsights = useCallback(async (isManual = false) => {
     if (!user?.id) return;
     const tz = getCalendars()[0]?.timeZone ?? 'UTC';
     const localDate = new Date().toLocaleDateString('en-CA', { timeZone: tz });
     const cacheKey = analyticsCacheKey(user.id, localDate);
+
+    // Daily rate limit on manual refreshes
+    if (isManual && REFRESH_DATE_KEY) {
+      const lastDate = await AsyncStorage.getItem(REFRESH_DATE_KEY);
+      if (lastDate === localDate) {
+        setInsightsError("You've already refreshed today. Come back tomorrow for fresh insights!");
+        setTimeout(() => setInsightsError(''), 4000);
+        return;
+      }
+    }
 
     setInsightsLoading(true);
     setInsightsError('');
@@ -387,15 +393,31 @@ export default function AnalyticsScreen() {
     try {
       await clearAgentCache(user.id);
       const now = new Date();
-      // Use last 90 days so insights have rich context even for slow months
       const ninetyDaysAgo = new Date(now);
       ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 89);
       const monthTx = transactions
         .filter((tx) => new Date(tx.date) >= ninetyDaysAgo)
         .map((tx) => ({ ...tx, category: tx.category ?? null }));
 
+      // Fetch feedback to personalise prompt — no RAG needed, plain context injection
+      const { data: feedbackRows } = await supabase
+        .from('insight_feedback')
+        .select('insight_title, feedback_type')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(15);
+
+      const liked = (feedbackRows ?? []).filter((r) => r.feedback_type === 'like').map((r) => r.insight_title);
+      const disliked = (feedbackRows ?? []).filter((r) => r.feedback_type === 'dislike').map((r) => r.insight_title);
+      const feedbackCtx = [
+        liked.length ? `User previously found these useful: ${liked.join('; ')}.` : '',
+        disliked.length ? `User found these unhelpful — avoid similar topics: ${disliked.join('; ')}.` : '',
+      ].filter(Boolean).join(' ');
+
+      const combinedPrompt = [userInsightPrompt, feedbackCtx].filter(Boolean).join(' ');
+
       const [freshInsights, freshSavings] = await Promise.all([
-        getDailyInsights(user.id, monthTx, userInsightPrompt || undefined),
+        getDailyInsights(user.id, monthTx, combinedPrompt || undefined),
         getWeeklySavingsRecommendations(user.id, monthTx),
       ]);
 
@@ -410,6 +432,11 @@ export default function AnalyticsScreen() {
       setRefreshCooldown(true);
       setTimeout(() => setRefreshCooldown(false), 5 * 60 * 1000);
 
+      if (isManual && REFRESH_DATE_KEY) {
+        await AsyncStorage.setItem(REFRESH_DATE_KEY, localDate);
+        setRefreshedToday(true);
+      }
+
       await AsyncStorage.setItem(
         cacheKey,
         JSON.stringify({ insights: insightsList, savings: savingsList, updatedAt: updatedAt.toISOString() })
@@ -422,7 +449,7 @@ export default function AnalyticsScreen() {
     } finally {
       setInsightsLoading(false);
     }
-  }, [user?.id, transactions, userInsightPrompt]);
+  }, [user?.id, transactions, userInsightPrompt, REFRESH_DATE_KEY]);
 
   const syncInsights = useCallback(async () => {
     if (!user?.id || transactions.length < 1) return;
@@ -577,9 +604,27 @@ export default function AnalyticsScreen() {
     const topCat = byCategory[0];
     const catObj = topCat ? categories.find((c) => c.name === topCat.name) : null;
     const budget = catObj?.budget ?? 0;
-    const category = topCat && budget > 0
-      ? { tone: topCat.amount > budget ? 'rose' : 'aqua', text: `${topCat.name} is at ${currencySymbol}${topCat.amount.toFixed(0)} of ${currencySymbol}${budget.toFixed(0)} budget${topCat.amount > budget ? ' — over budget!' : '.'}` }
-      : null;
+    let category = null;
+    if (topCat) {
+      if (budget > 0) {
+        const overBudget = topCat.amount > budget;
+        const remaining = budget - topCat.amount;
+        const pct = (topCat.amount / budget * 100).toFixed(0);
+        category = {
+          tone: overBudget ? 'rose' : 'aqua',
+          text: `${topCat.name} is at ${pct}% of its ${currencySymbol}${budget.toFixed(0)} budget${overBudget ? ` — over by ${currencySymbol}${(topCat.amount - budget).toFixed(0)}!` : `. ${currencySymbol}${remaining.toFixed(0)} to spare.`}`,
+        };
+      } else {
+        const topPct = totalSpent > 0 ? Math.round(topCat.amount / totalSpent * 100) : 0;
+        const second = byCategory[1];
+        const secondPct = second && totalSpent > 0 ? Math.round(second.amount / totalSpent * 100) : null;
+        const secondText = second && secondPct ? ` ${second.name} follows at ${secondPct}%.` : '';
+        category = {
+          tone: 'amber',
+          text: `${topCat.name} leads at ${topPct}% of spending (${currencySymbol}${topCat.amount.toFixed(0)}).${secondText}`,
+        };
+      }
+    }
 
     return { distribution, trend, category };
   }, [donutData, trendChange, byCategory, categories, currencySymbol]);
@@ -679,47 +724,82 @@ export default function AnalyticsScreen() {
               const color = INSIGHT_TONE[insType] ?? t.auraAqua;
               const title = ins.title || ins.summary || 'Insight';
               const body = ins.description || ins.suggestion || ins.topCategory || '';
+              const iconKey = resolveInsightIcon(title, body, insType);
+              const fb = insightFeedback[title];
               return (
-                <GlassCard key={i} style={s.insightCard}>
-                  <View style={s.insightStrip}>
-                    <View style={[s.insightStripBar, { backgroundColor: color }]} />
-                  </View>
-                  <View style={s.insightIconRow}>
-                    <View style={[s.insightIconBadge, { backgroundColor: color + '2E' }]}>
-                      <Orb size={17} rings={false} />
+                <TouchableOpacity
+                  key={i}
+                  activeOpacity={0.85}
+                  onPress={() => setSelectedInsight({ title, body, color, iconKey, insType })}
+                >
+                  <GlassCard style={s.insightCard}>
+                    <View style={s.insightStrip}>
+                      <View style={[s.insightStripBar, { backgroundColor: color }]} />
                     </View>
-                    <Text style={[s.insightTitle, { color }]}>{title}</Text>
-                  </View>
-                  <Text style={s.insightBody}>{body}</Text>
-                  {insType === 'income_alert' && (
-                    <TouchableOpacity
-                      style={[s.insightCTA, { borderColor: color }]}
-                      onPress={() => navigation.navigate('Settings' as never)}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={[s.insightCTAText, { color }]}>Add income sources →</Text>
-                    </TouchableOpacity>
-                  )}
-                </GlassCard>
+                    <View style={s.insightIconRow}>
+                      <View style={[s.insightIconBadge, { backgroundColor: color + '2E' }]}>
+                        <InsightIcon iconKey={iconKey} color={color} />
+                      </View>
+                      <Text style={[s.insightTitle, { color }]}>{title}</Text>
+                    </View>
+                    <Text style={s.insightBody} numberOfLines={3} ellipsizeMode="tail">{body}</Text>
+                    <View style={s.feedbackRow}>
+                      {(['like', 'dislike', 'report'] as const).map((type) => (
+                        <TouchableOpacity
+                          key={type}
+                          style={[s.feedbackBtn, fb === type && { backgroundColor: color + '30' }]}
+                          onPress={(e) => { e.stopPropagation?.(); submitFeedback(title, type); }}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[s.feedbackBtnText, fb === type && { color }]}>
+                            {type === 'like' ? '👍' : type === 'dislike' ? '👎' : '🚩'}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                      <Text style={s.tapHint}>Tap to read more</Text>
+                    </View>
+                  </GlassCard>
+                </TouchableOpacity>
               );
             })}
-            {savingsRecs.map((rec, i) => (
-              <GlassCard key={`sav-${i}`} style={s.insightCard}>
-                <View style={s.insightStrip}>
-                  <View style={[s.insightStripBar, { backgroundColor: t.auraBlue }]} />
-                </View>
-                <View style={s.insightIconRow}>
-                  <View style={[s.insightIconBadge, { backgroundColor: t.auraBlue + '2E' }]}>
-                    <Orb size={17} rings={false} />
-                  </View>
-                  <Text style={[s.insightTitle, { color: t.auraBlue }]}>💰 {rec.title}</Text>
-                </View>
-                <Text style={s.insightBody}>{rec.description}</Text>
-                {rec.potentialSavings && (
-                  <Text style={s.potentialSavings}>{rec.potentialSavings}</Text>
-                )}
-              </GlassCard>
-            ))}
+            {savingsRecs.map((rec, i) => {
+              const fb = insightFeedback[rec.title];
+              return (
+                <TouchableOpacity
+                  key={`sav-${i}`}
+                  activeOpacity={0.85}
+                  onPress={() => setSelectedInsight({ title: rec.title, body: rec.description, color: t.auraBlue, iconKey: 'savings', insType: 'tip', potentialSavings: rec.potentialSavings })}
+                >
+                  <GlassCard style={s.insightCard}>
+                    <View style={s.insightStrip}>
+                      <View style={[s.insightStripBar, { backgroundColor: t.auraBlue }]} />
+                    </View>
+                    <View style={s.insightIconRow}>
+                      <View style={[s.insightIconBadge, { backgroundColor: t.auraBlue + '2E' }]}>
+                        <SavingsIcon color={t.auraBlue} />
+                      </View>
+                      <Text style={[s.insightTitle, { color: t.auraBlue }]}>{rec.title}</Text>
+                    </View>
+                    <Text style={s.insightBody} numberOfLines={3} ellipsizeMode="tail">{rec.description}</Text>
+                    <View style={s.feedbackRow}>
+                      {(['like', 'dislike', 'report'] as const).map((type) => (
+                        <TouchableOpacity
+                          key={type}
+                          style={[s.feedbackBtn, fb === type && { backgroundColor: t.auraBlue + '30' }]}
+                          onPress={(e) => { e.stopPropagation?.(); submitFeedback(rec.title, type); }}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[s.feedbackBtnText, fb === type && { color: t.auraBlue }]}>
+                            {type === 'like' ? '👍' : type === 'dislike' ? '👎' : '🚩'}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                      <Text style={s.tapHint}>Tap to read more</Text>
+                    </View>
+                  </GlassCard>
+                </TouchableOpacity>
+              );
+            })}
           </>
         )}
 
@@ -733,20 +813,20 @@ export default function AnalyticsScreen() {
             >
               <Text style={s.ghostBtnText}>✏️ Customize</Text>
             </TouchableOpacity>
-            {showRefreshButton && (
-              <TouchableOpacity
-                style={[s.ghostBtn, (insightsLoading || refreshCooldown) && { opacity: 0.5 }]}
-                onPress={fetchAndCacheInsights}
-                disabled={insightsLoading || refreshCooldown}
-                activeOpacity={0.8}
-              >
-                {insightsLoading ? (
-                  <ActivityIndicator size="small" color={t.auraAqua} />
-                ) : (
-                  <Text style={s.ghostBtnText}>{refreshCooldown ? 'Wait 5 min' : '↻ Refresh'}</Text>
-                )}
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity
+              style={[s.ghostBtn, (insightsLoading || refreshCooldown || refreshedToday) && { opacity: 0.5 }]}
+              onPress={() => fetchAndCacheInsights(true)}
+              disabled={insightsLoading || refreshCooldown || refreshedToday}
+              activeOpacity={0.8}
+            >
+              {insightsLoading ? (
+                <ActivityIndicator size="small" color={t.auraAqua} />
+              ) : (
+                <Text style={s.ghostBtnText}>
+                  {refreshedToday ? '✓ Refreshed today' : refreshCooldown ? 'Wait 5 min...' : '↻ Refresh'}
+                </Text>
+              )}
+            </TouchableOpacity>
           </View>
         )}
 
@@ -828,14 +908,14 @@ export default function AnalyticsScreen() {
         {/* ── Totals ── */}
         <View style={s.totalsRow}>
           <GlassCard style={s.totalCard}>
-            <Text style={s.eyebrow}>Total Spent</Text>
-            <Text style={[s.totalValue, { color: t.auraRose }]}>
+            <Text allowFontScaling={false} style={s.eyebrow}>Total Spent</Text>
+            <Text allowFontScaling={false} style={[s.totalValue, { color: t.auraRose }]}>
               {currencySymbol}{totalSpent.toFixed(0)}
             </Text>
           </GlassCard>
           <GlassCard style={s.totalCard}>
-            <Text style={s.eyebrow}>Income</Text>
-            <Text style={[s.totalValue, { color: t.auraAqua }]}>
+            <Text allowFontScaling={false} style={s.eyebrow}>Income</Text>
+            <Text allowFontScaling={false} style={[s.totalValue, { color: t.auraAqua }]}>
               {currencySymbol}{(monthlyIncome || totalIncome).toFixed(0)}
             </Text>
           </GlassCard>
@@ -863,14 +943,14 @@ export default function AnalyticsScreen() {
                     i < byCategory.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.glassLine },
                   ]}
                 >
-                  <CatIcon name={cat.name} size={36} radius={11} />
+                  <CatIconComponent name={cat.name} size={38} radius={12} />
                   <View style={s.catInfo}>
-                    <Text style={s.catName}>{cat.name}</Text>
+                    <Text allowFontScaling={false} style={s.catName}>{cat.name}</Text>
                     <View style={{ marginTop: 8 }}>
                       <Bar pct={Math.min(100, pct * 2.2)} color={color} height={5} />
                     </View>
                   </View>
-                  <Text style={s.catAmount}>{currencySymbol}{cat.amount.toFixed(0)}</Text>
+                  <Text allowFontScaling={false} style={s.catAmount}>{currencySymbol}{cat.amount.toFixed(0)}</Text>
                 </View>
               );
             })
@@ -896,6 +976,60 @@ export default function AnalyticsScreen() {
         }}
         onClose={() => setShowDatePicker(false)}
       />
+
+      {/* Insight detail bottom sheet */}
+      <Modal
+        visible={selectedInsight !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSelectedInsight(null)}
+      >
+        <TouchableOpacity
+          style={s.sheetOverlay}
+          activeOpacity={1}
+          onPress={() => setSelectedInsight(null)}
+        />
+        {selectedInsight && (
+          <View style={s.sheetContainer}>
+            <View style={s.sheetHandle} />
+            <View style={[s.sheetIconRow]}>
+              <View style={[s.insightIconBadge, { backgroundColor: selectedInsight.color + '22' }]}>
+                <InsightIcon iconKey={selectedInsight.iconKey} color={selectedInsight.color} />
+              </View>
+              <Text style={[s.sheetTitle, { color: selectedInsight.color }]} numberOfLines={2}>
+                {selectedInsight.title}
+              </Text>
+            </View>
+            <ScrollView style={s.sheetScroll} showsVerticalScrollIndicator={false}>
+              <Text style={s.sheetBody}>{selectedInsight.body}</Text>
+              {selectedInsight.potentialSavings ? (
+                <Text style={s.sheetSavings}>Potential savings: {selectedInsight.potentialSavings}</Text>
+              ) : null}
+            </ScrollView>
+            <View style={s.sheetFeedbackRow}>
+              {(['like', 'dislike', 'report'] as const).map((type) => {
+                const fb = insightFeedback[selectedInsight.title];
+                const icons = { like: '👍', dislike: '👎', report: '🚩' };
+                return (
+                  <TouchableOpacity
+                    key={type}
+                    style={[s.sheetFeedbackBtn, fb === type && { backgroundColor: selectedInsight.color + '25' }]}
+                    onPress={() => submitFeedback(selectedInsight.title, type)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[s.sheetFeedbackText, fb === type && { color: selectedInsight.color }]}>
+                      {icons[type]}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+              <TouchableOpacity style={s.sheetCloseBtn} onPress={() => setSelectedInsight(null)} activeOpacity={0.8}>
+                <Text style={s.sheetCloseBtnText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      </Modal>
     </View>
   );
 }
@@ -1277,7 +1411,6 @@ const s = StyleSheet.create({
   barTrack: {
     borderRadius: 99,
     backgroundColor: t.surface3,
-    overflow: 'hidden',
   },
   barFill: {
     borderRadius: 99,
@@ -1323,5 +1456,108 @@ const s = StyleSheet.create({
     marginTop: 16,
     paddingHorizontal: 8,
     lineHeight: 14,
+  },
+
+  // ── Insight card feedback row ──
+  feedbackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+    gap: 6,
+  },
+  feedbackBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: 'transparent',
+  },
+  feedbackBtnText: {
+    fontSize: 15,
+    color: t.text3,
+  },
+  tapHint: {
+    flex: 1,
+    fontSize: 11,
+    fontFamily: fonts.regular,
+    color: t.text4,
+    textAlign: 'right',
+  },
+
+  // ── Insight detail bottom sheet ──
+  sheetOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  sheetContainer: {
+    backgroundColor: '#12152A',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 12,
+    paddingHorizontal: 22,
+    paddingBottom: 36,
+    maxHeight: '75%',
+  },
+  sheetHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 99,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignSelf: 'center',
+    marginBottom: 18,
+  },
+  sheetIconRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 16,
+  },
+  sheetTitle: {
+    flex: 1,
+    fontSize: 18,
+    fontFamily: fonts.semiBold,
+    fontWeight: '600',
+    lineHeight: 24,
+  },
+  sheetScroll: {
+    maxHeight: 300,
+  },
+  sheetBody: {
+    fontSize: 15,
+    fontFamily: fonts.regular,
+    color: t.text2,
+    lineHeight: 23,
+  },
+  sheetSavings: {
+    fontSize: 14,
+    fontFamily: fonts.semiBold,
+    fontWeight: '600',
+    color: t.green,
+    marginTop: 12,
+  },
+  sheetFeedbackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 20,
+    gap: 8,
+  },
+  sheetFeedbackBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  sheetFeedbackText: {
+    fontSize: 18,
+    color: t.text3,
+  },
+  sheetCloseBtn: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  sheetCloseBtnText: {
+    fontSize: 14,
+    fontFamily: fonts.semiBold,
+    fontWeight: '600',
+    color: t.text3,
   },
 });
