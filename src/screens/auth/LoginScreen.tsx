@@ -105,7 +105,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
             Welcome to Finni
           </Text>
           <Text style={[styles.subtitle, { fontFamily: fonts.regular }]}>
-            Your calm AI finance coach
+            Smart money, zero stress
           </Text>
         </View>
 

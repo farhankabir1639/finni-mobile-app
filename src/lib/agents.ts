@@ -39,7 +39,7 @@ const GEMINI_DIRECT_URL = GEMINI_API_KEY_LEGACY
   : null;
 
 if (!GEMINI_PROXY_URL && !GEMINI_API_KEY_LEGACY) {
-  console.error('[Agent] No Gemini proxy or API key configured. All AI features will fail.');
+  if (__DEV__) console.error('[Agent] No Gemini proxy or API key configured. All AI features will fail.');
 }
 
 async function getAuthToken(): Promise<string | null> {

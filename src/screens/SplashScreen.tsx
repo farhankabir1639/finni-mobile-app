@@ -46,7 +46,7 @@ export default function SplashScreen() {
         <Orb size={140} rings talking />
         <Text style={[styles.title, { fontFamily: fonts.extraBold }]}>Finni</Text>
         <Text style={[styles.sub, { fontFamily: fonts.medium }]}>
-          Your calm AI finance coach
+          Smart money, zero stress
         </Text>
       </Animated.View>
 
