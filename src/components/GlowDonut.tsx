@@ -13,20 +13,20 @@ interface GlowDonutProps {
   centerSub?: string;
 }
 
-// Extra padding on each side to let glow bleed without clipping
-const GLOW_PAD = 16;
+const GLOW_PAD = 10;
 
-// Bloom layers: outermost → innermost (thicker→thinner, more transparent→less transparent)
+// Single tight inner glow — just enough to give vibrancy without bleeding
 const GLOW_RINGS = [
-  { extra: 22, opacity: 0.05 },
-  { extra: 13, opacity: 0.12 },
-  { extra: 6,  opacity: 0.22 },
+  { extra: 3, opacity: 0.18 },
 ] as const;
+
+// Gap between segments for clean separation
+const SEG_GAP = 3;
 
 export default function GlowDonut({
   data,
   size = 180,
-  strokeWidth = 22,
+  strokeWidth = 20,
   centerLabel,
   centerSub,
 }: GlowDonutProps) {
@@ -37,13 +37,15 @@ export default function GlowDonut({
   const circumference = 2 * Math.PI * radius;
 
   let accumulated = 0;
-  const arcs = data.map((slice) => {
-    const len = (slice.pct / 100) * circumference;
-    const offset = circumference - len;
-    const rotation = -90 + (accumulated / 100) * 360;
-    accumulated += slice.pct;
-    return { ...slice, len, offset, rotation };
-  });
+  const arcs = data
+    .filter((slice) => slice.pct > 0)
+    .map((slice) => {
+      const len = Math.max(0, (slice.pct / 100) * circumference - SEG_GAP);
+      const offset = circumference - len;
+      const rotation = -90 + (accumulated / 100) * 360;
+      accumulated += slice.pct;
+      return { ...slice, len, offset, rotation };
+    });
 
   // Center hole insets within the canvas
   const holeInset = GLOW_PAD + strokeWidth + 4;

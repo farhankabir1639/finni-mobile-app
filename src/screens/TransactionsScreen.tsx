@@ -20,7 +20,10 @@ import { trackScreen } from '../lib/analytics';
 import Aurora from '../components/Aurora';
 import GlassCard from '../components/GlassCard';
 import CategoryPickerSheet, { type PickerCategory } from '../components/CategoryPickerSheet';
+import CatIcon, { getCatConfig } from '../components/CatIcon';
+import DateRangePicker, { type DateRange, fmtShort } from '../components/DateRangePicker';
 import { t, fonts } from '../theme/tokens';
+import Svg, { Path } from 'react-native-svg';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Transaction = {
@@ -35,7 +38,7 @@ type Transaction = {
   categories?: { id: string; name: string; emoji?: string } | null;
 };
 
-type FilterOption = 'all' | 'today' | 'week' | 'month';
+type FilterOption = 'all' | 'today' | 'week' | 'month' | 'custom';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 function formatDateHeader(dateStr: string): string {
@@ -54,14 +57,6 @@ function formatTime(dateStr: string): string {
 
 function formatAmount(amount: number, isExpense: boolean, sym: string): string {
   return `${isExpense ? '-' : '+'}${sym}${Math.abs(amount).toFixed(2)}`;
-}
-
-function getCategoryColor(name: string | null): string {
-  const palette = [t.auraViolet, t.auraIndigo, t.auraRose, t.amber, t.green, t.auraBlue];
-  if (!name) return palette[0];
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  return palette[Math.abs(hash) % palette.length];
 }
 
 function getStart(type: 'day' | 'week' | 'month', now: Date): Date {
@@ -88,6 +83,8 @@ export default function TransactionsScreen() {
   const [filter, setFilter] = useState<FilterOption>('all');
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [showPicker, setShowPicker] = useState(false);
+  const [customRange, setCustomRange] = useState<DateRange | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   const fetchTransactions = useCallback(async () => {
@@ -145,15 +142,19 @@ export default function TransactionsScreen() {
     const startWeek  = getStart('week', now);
     const startMonth = getStart('month', now);
 
+    const customStart = customRange ? new Date(customRange.start + 'T00:00:00') : null;
+    const customEnd   = customRange ? new Date(customRange.end   + 'T23:59:59') : null;
+
     const list = transactions.filter(tx => {
       const desc = (tx.description ?? '').toLowerCase();
       const cat  = (tx.categories?.name ?? '').toLowerCase();
       const q    = searchQuery.toLowerCase().trim();
       if (q && !desc.includes(q) && !cat.includes(q)) return false;
       const d = new Date(tx.date);
-      if (filter === 'today' && d < startToday) return false;
-      if (filter === 'week'  && d < startWeek)  return false;
-      if (filter === 'month' && d < startMonth) return false;
+      if (filter === 'today'  && d < startToday) return false;
+      if (filter === 'week'   && d < startWeek)  return false;
+      if (filter === 'month'  && d < startMonth) return false;
+      if (filter === 'custom' && customStart && (d < customStart || (customEnd && d > customEnd))) return false;
       return true;
     });
 
@@ -172,7 +173,7 @@ export default function TransactionsScreen() {
       }
     }
     return groups;
-  }, [transactions, searchQuery, filter]);
+  }, [transactions, searchQuery, filter, customRange]);
 
   const summary = useMemo(() => {
     let spent = 0; let income = 0;
@@ -185,11 +186,16 @@ export default function TransactionsScreen() {
     return { spent, income };
   }, [filteredAndGrouped]);
 
+  const customChipLabel = customRange
+    ? `${fmtShort(customRange.start)} – ${fmtShort(customRange.end)}`
+    : '📅 Custom';
+
   const filterChips: { key: FilterOption; label: string }[] = [
-    { key: 'all',   label: 'All' },
-    { key: 'today', label: 'Today' },
-    { key: 'week',  label: 'This Week' },
-    { key: 'month', label: 'This Month' },
+    { key: 'all',    label: 'All' },
+    { key: 'today',  label: 'Today' },
+    { key: 'week',   label: 'This Week' },
+    { key: 'month',  label: 'This Month' },
+    { key: 'custom', label: customChipLabel },
   ];
 
   // ── Transaction item ───────────────────────────────────────────────────────
@@ -197,9 +203,9 @@ export default function TransactionsScreen() {
     const amt       = tx.type === 'expense' ? (Number(tx.withdrawal) || 0) : (Number(tx.deposit) || 0);
     const isExpense = tx.type === 'expense';
     const name      = tx.description?.trim() || 'Transaction';
-    const cat       = tx.categories ?? null;
-    const catLabel  = cat ? `${cat.emoji ?? '💰'} ${cat.name}` : 'Uncategorized';
-    const dotColor  = getCategoryColor(cat?.name ?? null);
+    const catName   = tx.categories?.name ?? null;
+    const catCfg    = getCatConfig(catName);
+    const catLabel  = catName ?? 'Uncategorized';
 
     return (
       <Pressable
@@ -209,11 +215,18 @@ export default function TransactionsScreen() {
         onLongPress={() => handleDeleteTransaction(tx.id)}
         android_ripple={{ color: 'rgba(255,255,255,0.04)' }}
       >
-        <View style={[styles.txDot, { backgroundColor: dotColor }]} />
+        {/* Icon tile — matches design CatIcon(42, radius 13) */}
+        <CatIcon name={catName} size={42} radius={13} />
         <View style={styles.txInfo}>
           <Text style={[styles.txName, { fontFamily: fonts.semiBold }]} numberOfLines={1}>{name}</Text>
-          <Text style={[styles.txCat, { fontFamily: fonts.regular }]}>{catLabel}</Text>
-          <Text style={[styles.txTime, { fontFamily: fonts.regular }]}>{formatTime(tx.date)}</Text>
+          {/* Category name (colored) + chevron-down + time — single meta row */}
+          <View style={styles.txMeta}>
+            <Text style={[styles.txCatName, { fontFamily: fonts.semiBold, color: catCfg.color }]}>{catLabel}</Text>
+            <Svg width={11} height={11} viewBox="0 0 24 24" style={styles.txChevron}>
+              <Path d="M5 9.5 12 16l7-6.5" stroke={catCfg.color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+            </Svg>
+            <Text style={[styles.txTime, { fontFamily: fonts.regular }]}> · {formatTime(tx.date)}</Text>
+          </View>
         </View>
         <Text style={[styles.txAmt, { fontFamily: fonts.bold }, isExpense ? styles.amtExpense : styles.amtIncome]}>
           {formatAmount(amt, isExpense, currencySymbol)}
@@ -250,7 +263,7 @@ export default function TransactionsScreen() {
         >
           {/* Title */}
           <Text style={[styles.title, { fontFamily: fonts.extraBold }]}>Transactions</Text>
-          <Text style={[styles.subtitle, { fontFamily: fonts.regular }]}>Tap a transaction to reclassify</Text>
+          <Text style={[styles.subtitle, { fontFamily: fonts.regular }]}>A calm record of your money</Text>
 
           {/* Search */}
           <GlassCard style={styles.searchCard} borderRadius={t.rMd} intensity={18}>
@@ -277,10 +290,16 @@ export default function TransactionsScreen() {
                 <TouchableOpacity
                   key={chip.key}
                   style={[styles.chip, active && styles.chipActive]}
-                  onPress={() => setFilter(chip.key)}
+                  onPress={() => {
+                    if (chip.key === 'custom') {
+                      setShowDatePicker(true);
+                    } else {
+                      setFilter(chip.key);
+                    }
+                  }}
                   activeOpacity={0.8}
                 >
-                  <Text style={[styles.chipText, { fontFamily: fonts.semiBold }, active && styles.chipTextActive]}>
+                  <Text allowFontScaling={false} style={[styles.chipText, { fontFamily: fonts.semiBold }, active && styles.chipTextActive]}>
                     {chip.label}
                   </Text>
                 </TouchableOpacity>
@@ -346,6 +365,18 @@ export default function TransactionsScreen() {
         categories={allCategories}
         currentCategoryId={selectedTx?.category_id}
         onSelect={handleCategoryChange}
+      />
+
+      {/* Custom date range picker */}
+      <DateRangePicker
+        visible={showDatePicker}
+        value={customRange}
+        onApply={(range) => {
+          setCustomRange(range);
+          setFilter('custom');
+          setShowDatePicker(false);
+        }}
+        onClose={() => setShowDatePicker(false)}
       />
     </View>
   );
@@ -523,26 +554,28 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   txItemLast: {},
-  txDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 12,
-  },
   txInfo: {
     flex: 1,
-    gap: 2,
+    marginLeft: 13,
+    gap: 3,
   },
   txName: {
-    fontSize: 15,
+    fontSize: 15.5,
     color: t.text,
   },
-  txCat: {
+  txMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  txCatName: {
     fontSize: 12,
-    color: t.text2,
+  },
+  txChevron: {
+    marginTop: 1,
   },
   txTime: {
-    fontSize: 11,
+    fontSize: 12,
     color: t.text3,
   },
   txAmt: {

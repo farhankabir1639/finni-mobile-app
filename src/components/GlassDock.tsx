@@ -12,7 +12,7 @@ import Svg, { Path, Polyline, Line, Rect, Circle } from 'react-native-svg';
 import { t } from '../theme/tokens';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
-// ── Minimal stroke icons ──────────────────────────────────────────────────────
+// ── Stroke icons ──────────────────────────────────────────────────────────────
 
 function IconHome({ color }: { color: string }) {
   return (
@@ -75,7 +75,7 @@ const TAB_LABELS: Record<string, string> = {
   Settings:     'Settings',
 };
 
-// ── GlassDock component ───────────────────────────────────────────────────────
+// ── GlassDock ─────────────────────────────────────────────────────────────────
 
 export default function GlassDock({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
@@ -91,19 +91,25 @@ export default function GlassDock({ state, descriptors, navigation }: BottomTabB
         };
         const IconComp = TAB_ICONS[route.name];
         const label = TAB_LABELS[route.name] ?? route.name;
-        const color = focused ? t.auraAqua : t.text3;
+        const iconColor = focused ? '#ffffff' : t.text3;
 
         return (
           <TouchableOpacity
             key={route.key}
             onPress={onPress}
             style={styles.tab}
-            activeOpacity={0.7}
+            activeOpacity={0.75}
           >
-            {/* per-tab indicator — stays within the cell, adapts to pill corners */}
-            {focused && <View style={styles.indicator} />}
-            {IconComp ? <IconComp color={color} /> : <Text style={{ color }}>{label[0]}</Text>}
-            <Text style={[styles.label, { color }]}>{label}</Text>
+            {focused ? (
+              <View style={styles.activePill}>
+                {IconComp && <IconComp color={iconColor} />}
+              </View>
+            ) : (
+              <>
+                {IconComp && <IconComp color={iconColor} />}
+                <Text allowFontScaling={false} style={[styles.label, { color: iconColor }]}>{label}</Text>
+              </>
+            )}
           </TouchableOpacity>
         );
       })}
@@ -145,7 +151,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingVertical: 10,
     paddingHorizontal: 4,
-    position: 'relative',
+    alignItems: 'center',
   },
   tab: {
     flex: 1,
@@ -153,24 +159,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 4,
     paddingVertical: 4,
+    minHeight: 58,
+  },
+  activePill: {
+    width: 54,
+    height: 54,
+    borderRadius: 18,
+    backgroundColor: t.auraIndigo,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: t.auraIndigo,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.55,
+    shadowRadius: 12,
+    elevation: 10,
   },
   label: {
     fontSize: 10,
     fontWeight: '600',
     letterSpacing: 0.3,
-  },
-  indicator: {
-    position: 'absolute',
-    top: 0,
-    alignSelf: 'center',
-    width: 24,
-    height: 2,
-    borderRadius: 1,
-    backgroundColor: t.auraAqua,
-    shadowColor: t.auraAqua,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 6,
-    elevation: 6,
   },
 });

@@ -39,13 +39,15 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": true
+      "predictiveBackGestureEnabled": true,
+      "softwareKeyboardLayoutMode": "pan"
     },
     "extra": {
       "eas": {
         "projectId": "e321e1be-455d-404c-95a9-aa6c02be4bd6"
       },
       "privacyPolicyUrl": "https://www.heyfinni.com/privacy-policy",
+      "termsOfServiceUrl": "https://www.heyfinni.com/terms",
       "dataDeletionUrl": "https://www.heyfinni.com/data-deletion",
       "supportEmail": "support@heyfinni.com"
     },

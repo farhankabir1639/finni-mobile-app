@@ -43,10 +43,12 @@ export default function TrendArea({
     linePath += ` C ${cx} ${ys[i - 1]}, ${cx} ${ys[i]}, ${xs[i]} ${ys[i]}`;
   }
 
-  // Closed area path for fill
+  // Closed area path for gradient fill
   const areaPath = `${linePath} L ${xs[xs.length - 1]} ${height} L ${xs[0]} ${height} Z`;
 
   const lastIdx = data.length - 1;
+  const endX = xs[lastIdx];
+  const endY = ys[lastIdx];
 
   return (
     <View style={styles.container}>
@@ -57,19 +59,44 @@ export default function TrendArea({
       >
         <Defs>
           <LinearGradient id="trendAreaFill" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={t.auraViolet} stopOpacity="0.4" />
+            <Stop offset="0" stopColor={t.auraViolet} stopOpacity="0.35" />
+            <Stop offset="0.7" stopColor={t.auraViolet} stopOpacity="0.08" />
             <Stop offset="1" stopColor={t.auraViolet} stopOpacity="0" />
           </LinearGradient>
           <LinearGradient id="trendLine" x1="0" y1="0" x2="1" y2="0">
             <Stop offset="0" stopColor={t.auraAqua} />
             <Stop offset="1" stopColor={t.auraViolet} />
           </LinearGradient>
+          <LinearGradient id="trendGlow1" x1="0" y1="0" x2="1" y2="0">
+            <Stop offset="0" stopColor={t.auraAqua} stopOpacity="0.25" />
+            <Stop offset="1" stopColor={t.auraViolet} stopOpacity="0.25" />
+          </LinearGradient>
+          <LinearGradient id="trendGlow2" x1="0" y1="0" x2="1" y2="0">
+            <Stop offset="0" stopColor={t.auraAqua} stopOpacity="0.12" />
+            <Stop offset="1" stopColor={t.auraViolet} stopOpacity="0.12" />
+          </LinearGradient>
         </Defs>
 
         {/* Area fill */}
         <Path d={areaPath} fill="url(#trendAreaFill)" />
 
-        {/* Line */}
+        {/* Glow layers — outermost to innermost */}
+        <Path
+          d={linePath}
+          fill="none"
+          stroke="url(#trendGlow2)"
+          strokeWidth={16}
+          strokeLinecap="round"
+        />
+        <Path
+          d={linePath}
+          fill="none"
+          stroke="url(#trendGlow1)"
+          strokeWidth={8}
+          strokeLinecap="round"
+        />
+
+        {/* Main line */}
         <Path
           d={linePath}
           fill="none"
@@ -78,13 +105,11 @@ export default function TrendArea({
           strokeLinecap="round"
         />
 
+        {/* Endpoint halo */}
+        <Circle cx={endX} cy={endY} r={14} fill={t.auraAqua} opacity={0.12} />
+        <Circle cx={endX} cy={endY} r={8} fill={t.auraAqua} opacity={0.22} />
         {/* Endpoint dot */}
-        <Circle
-          cx={xs[lastIdx]}
-          cy={ys[lastIdx]}
-          r={5}
-          fill="#fff"
-        />
+        <Circle cx={endX} cy={endY} r={5} fill="#fff" />
 
         {/* Month labels */}
         {data.map((d, i) => (

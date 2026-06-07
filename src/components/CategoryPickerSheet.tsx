@@ -1,10 +1,10 @@
 import React from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Platform,
+  View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Path } from 'react-native-svg';
 import { t, fonts } from '../theme/tokens';
+import CatIcon, { getCatConfig } from './CatIcon';
 
 export type PickerCategory = { id: string; name: string; emoji?: string };
 
@@ -32,35 +32,42 @@ export default function CategoryPickerSheet({
         </View>
 
         <View style={styles.header}>
-          <Text style={[styles.title, { fontFamily: fonts.bold }]}>Change Category</Text>
+          <Text style={[styles.title, { fontFamily: fonts.bold }]}>Change category</Text>
           <TouchableOpacity onPress={onClose} hitSlop={12} activeOpacity={0.7}>
             <Text style={styles.closeBtn}>✕</Text>
           </TouchableOpacity>
         </View>
 
         <ScrollView
-          contentContainerStyle={styles.grid}
+          contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
         >
           {categories.map(cat => {
             const active = cat.id === currentCategoryId;
+            const cfg = getCatConfig(cat.name);
             return (
               <TouchableOpacity
                 key={cat.id}
-                style={[styles.tile, active && styles.tileActive]}
+                style={[styles.row, active && styles.rowActive]}
                 onPress={() => { onSelect(cat.id); onClose(); }}
                 activeOpacity={0.75}
               >
-                <Text style={styles.tileEmoji}>{cat.emoji ?? '💰'}</Text>
+                <CatIcon name={cat.name} size={38} radius={11} />
                 <Text
-                  style={[styles.tileName, { fontFamily: fonts.medium }, active && styles.tileNameActive]}
+                  style={[
+                    styles.rowName,
+                    { fontFamily: active ? fonts.semiBold : fonts.regular },
+                    active && { color: cfg.color },
+                  ]}
                   numberOfLines={1}
                 >
                   {cat.name}
                 </Text>
                 {active && (
-                  <View style={styles.checkBadge}>
-                    <Text style={styles.checkText}>✓</Text>
+                  <View style={[styles.checkBadge, { backgroundColor: cfg.color }]}>
+                    <Svg width={11} height={11} viewBox="0 0 24 24">
+                      <Path d="M5 12l5 5L19 7" stroke={t.auraBg} strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                    </Svg>
                   </View>
                 )}
               </TouchableOpacity>
@@ -86,7 +93,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: t.line2,
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
   header: {
     flexDirection: 'row',
@@ -95,63 +102,47 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: t.line,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
   },
   title: {
-    fontSize: 18,
+    fontSize: 17,
     color: t.text,
   },
   closeBtn: {
     fontSize: 18,
     color: t.text2,
   },
-  grid: {
+  list: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    gap: 6,
+  },
+  row: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    padding: 16,
-    gap: 12,
-  },
-  tile: {
-    width: '30%',
-    minWidth: 90,
-    backgroundColor: 'rgba(255,255,255,0.055)',
-    borderWidth: 1,
-    borderColor: t.glassLine,
-    borderRadius: t.rMd,
-    paddingVertical: 16,
-    paddingHorizontal: 8,
     alignItems: 'center',
-    gap: 8,
+    gap: 14,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
   },
-  tileActive: {
-    borderColor: t.auraAqua,
-    backgroundColor: 'rgba(94,234,212,0.10)',
+  rowActive: {
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderColor: 'rgba(255,255,255,0.13)',
   },
-  tileEmoji: {
-    fontSize: 28,
-  },
-  tileName: {
-    fontSize: 12,
-    color: t.text2,
-    textAlign: 'center',
-  },
-  tileNameActive: {
-    color: t.auraAqua,
+  rowName: {
+    flex: 1,
+    fontSize: 15,
+    color: t.text,
+    textTransform: 'capitalize',
   },
   checkBadge: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: t.auraAqua,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  checkText: {
-    fontSize: 11,
-    color: t.auraBg,
-    fontWeight: '700',
   },
 });

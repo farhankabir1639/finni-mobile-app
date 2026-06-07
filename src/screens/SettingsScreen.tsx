@@ -7,6 +7,7 @@ import { trackScreen } from '../lib/analytics';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const PRIVACY_URL = 'https://www.heyfinni.com/privacy-policy';
+const TERMS_URL = 'https://www.heyfinni.com/terms';
 const DATA_DELETION_URL = 'https://www.heyfinni.com/data-deletion';
 const SUPPORT_EMAIL = 'support@heyfinni.com';
 import { useAuth } from '../contexts/AuthContext';
@@ -204,6 +205,7 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Legal & Support</Text>
           <SettingsRow label="Privacy Policy" icon="🛡️" color={t.text2} onPress={() => Linking.openURL(PRIVACY_URL)} />
+          <SettingsRow label="Terms of Service" icon="📋" color={t.text2} onPress={() => Linking.openURL(TERMS_URL)} />
           <SettingsRow label="Contact Support" icon="🎧" color={t.text2} onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}`)} />
           <SettingsRow label="Clear Cached Data" icon="🔄" color={t.text2} onPress={handleClearCache} />
         </View>

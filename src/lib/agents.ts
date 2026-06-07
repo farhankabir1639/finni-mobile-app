@@ -76,11 +76,14 @@ async function callGemini(prompt: string, retryCount = 0): Promise<string> {
 
 async function callGeminiWithHistory(
   contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }>,
-  retryCount = 0
+  retryCount = 0,
+  genConfig?: Record<string, unknown>
 ): Promise<string> {
   if (!GEMINI_PROXY_URL && !GEMINI_DIRECT_URL) throw new Error('Gemini is not configured');
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  const defaultConfig = { temperature: 0.3, maxOutputTokens: 2048 };
+  const effectiveConfig = genConfig ? { ...defaultConfig, ...genConfig } : defaultConfig;
   try {
     // Try edge function proxy first, fall back to direct if infra fails
     const token = await getAuthToken();
@@ -97,7 +100,7 @@ async function callGeminiWithHistory(
         body: JSON.stringify({
           model: GEMINI_MODEL,
           contents,
-          generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
+          generationConfig: effectiveConfig,
         }),
         signal: controller.signal,
       });
@@ -110,7 +113,7 @@ async function callGeminiWithHistory(
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents,
-            generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
+            generationConfig: effectiveConfig,
           }),
           signal: controller.signal,
         });
@@ -130,7 +133,7 @@ async function callGeminiWithHistory(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents,
-          generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
+          generationConfig: effectiveConfig,
         }),
       });
       res = directRes;
@@ -142,7 +145,7 @@ async function callGeminiWithHistory(
         const delay = RETRY_DELAYS[retryCount];
         if (__DEV__) console.log(`[Gemini] ${status} error, retrying in ${delay}ms (attempt ${retryCount + 1}/3)`);
         await new Promise((r) => setTimeout(r, delay));
-        return callGeminiWithHistory(contents, retryCount + 1);
+        return callGeminiWithHistory(contents, retryCount + 1, genConfig);
       }
       const errBody = await res.json().catch(() => ({}));
       const errMsg = (errBody as any)?.error?.message ?? '';
@@ -161,7 +164,7 @@ async function callGeminiWithHistory(
         const delay = RETRY_DELAYS[retryCount];
         if (__DEV__) console.log(`[Gemini] Empty response, retrying in ${delay}ms (attempt ${retryCount + 1}/2)`);
         await new Promise((r) => setTimeout(r, delay));
-        return callGeminiWithHistory(contents, retryCount + 1);
+        return callGeminiWithHistory(contents, retryCount + 1, genConfig);
       }
       throw new Error('Empty Gemini response');
     }
@@ -213,6 +216,62 @@ Input: ${input}`;
   }
 }
 
+// --- Insights-specific Gemini call ---
+// Bypasses the Supabase proxy so Supabase edge function timeouts can't truncate
+// the response mid-JSON. Uses a bounded thinking budget (1024 tokens) so the
+// model still reasons about spending patterns without taking 30+ seconds.
+async function callInsightsDirect(prompt: string): Promise<string> {
+  if (!GEMINI_DIRECT_URL && !GEMINI_PROXY_URL) throw new Error('Gemini is not configured');
+
+  const body = JSON.stringify({
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: 0.4,
+      maxOutputTokens: 4096,
+      thinkingConfig: { thinkingBudget: 1024 },
+    },
+  });
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 45000);
+
+  try {
+    // Always prefer direct API for insights to avoid proxy timeout truncation
+    const url = GEMINI_DIRECT_URL ?? GEMINI_PROXY_URL!;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (!GEMINI_DIRECT_URL && GEMINI_PROXY_URL) {
+      const token = await getAuthToken();
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    let res = await fetch(url, { method: 'POST', headers, body, signal: controller.signal });
+
+    // If direct failed with infra error and proxy is available, try proxy as fallback
+    if (isInfraError(res.status) && GEMINI_PROXY_URL && url !== GEMINI_PROXY_URL) {
+      const token = await getAuthToken();
+      res = await fetch(GEMINI_PROXY_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({
+          model: GEMINI_MODEL,
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 4096, thinkingConfig: { thinkingBudget: 1024 } },
+        }),
+        signal: controller.signal,
+      });
+    }
+
+    clearTimeout(timeoutId);
+    if (!res.ok) throw new Error(`Gemini insights error: ${res.status}`);
+    const data = await res.json();
+    return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+  } catch (e) {
+    clearTimeout(timeoutId);
+    if (e instanceof Error && e.name === 'AbortError') throw new Error('Insights request timed out');
+    throw e;
+  }
+}
+
 // --- AGENT 2: Daily insights (cached by date) ---
 export type DailyInsight = {
   // Enriched format
@@ -249,11 +308,11 @@ export async function getDailyInsights(
     return amount > 0 && desc.length >= 2 && (t.type === 'expense' || t.type === 'income');
   });
 
-  const MIN_TRANSACTIONS = 10;
+  const MIN_TRANSACTIONS = 3;
   if (realTransactions.length < MIN_TRANSACTIONS) {
     return [{
       title: 'Building your insights...',
-      description: `Finni needs at least ${MIN_TRANSACTIONS} real transactions to generate accurate, personalized insights. You have ${realTransactions.length} so far — keep logging!`,
+      description: `Log ${MIN_TRANSACTIONS - realTransactions.length} more transaction${MIN_TRANSACTIONS - realTransactions.length > 1 ? 's' : ''} and Finni will start generating personalized insights for you.`,
       type: 'tip',
     }];
   }
@@ -351,15 +410,35 @@ ${userPrompt ? `7. ADDITIONAL INSTRUCTIONS FROM USER: ${userPrompt}` : ''}
 Respond ONLY with a valid JSON array (no markdown):
 [{ "title": "...", "description": "...", "suggestion": "...", "type": "warning|tip|goal|income_alert" }]`;
 
-      const text = await callGemini(prompt);
+      const text = await callInsightsDirect(prompt);
       const cleaned = text.replace(/```json?|```/g, '').trim();
       let insights: DailyInsight[];
       try {
         insights = JSON.parse(cleaned);
         if (!Array.isArray(insights)) insights = [];
       } catch (parseErr) {
-        if (__DEV__) console.error('[Agent2] JSON parse Error:', parseErr);
-        insights = [];
+        // Attempt partial recovery: strip trailing incomplete object and close the array
+        let recovered = false;
+        try {
+          const arrayStart = cleaned.indexOf('[');
+          if (arrayStart !== -1) {
+            let partial = cleaned.slice(arrayStart);
+            partial = partial.replace(/,?\s*\{[^}]*$/, '');
+            if (!partial.endsWith(']')) partial += ']';
+            insights = JSON.parse(partial);
+            if (!Array.isArray(insights)) insights = [];
+            else recovered = insights.length > 0;
+            if (__DEV__) console.log('[Agent2] Recovered partial insights:', insights.length);
+          } else {
+            insights = [];
+          }
+        } catch {
+          insights = [];
+        }
+        if (!recovered) {
+          if (__DEV__) console.error('[Agent2] JSON parse Error (unrecoverable):', parseErr);
+          captureError(parseErr, { context: 'getDailyInsights.jsonParse', userId });
+        }
       }
 
       if (insights.length > 0) {
@@ -464,17 +543,37 @@ Return ONLY a valid JSON array (no markdown):
 [{ "title": "...", "description": "...", "potentialSavings": "..." }]
 Use ${currency} for all amounts. Be specific to the user's actual spending patterns.`;
 
-    const text = await callGemini(prompt);
+    const text = await callInsightsDirect(prompt);
     const cleaned = text.replace(/```json?|```/g, '').trim();
     let localizedResults: SavingsRecommendation[];
     try {
       localizedResults = JSON.parse(cleaned);
       if (!Array.isArray(localizedResults)) localizedResults = [];
     } catch (parseErr) {
-      if (__DEV__) console.error('[Agent3] JSON parse Error:', parseErr);
-      localizedResults = [];
+      let recovered = false;
+      try {
+        const arrayStart = cleaned.indexOf('[');
+        if (arrayStart !== -1) {
+          let partial = cleaned.slice(arrayStart);
+          partial = partial.replace(/,?\s*\{[^}]*$/, '');
+          if (!partial.endsWith(']')) partial += ']';
+          localizedResults = JSON.parse(partial);
+          if (!Array.isArray(localizedResults)) localizedResults = [];
+          else recovered = localizedResults.length > 0;
+        } else {
+          localizedResults = [];
+        }
+      } catch {
+        localizedResults = [];
+      }
+      if (!recovered) {
+        if (__DEV__) console.error('[Agent3] JSON parse Error (unrecoverable):', parseErr);
+        captureError(parseErr, { context: 'getWeeklySavingsRecommendations.jsonParse', userId });
+      }
     }
-    await AsyncStorage.setItem(weekKey, JSON.stringify(localizedResults));
+    if (localizedResults.length > 0) {
+      await AsyncStorage.setItem(weekKey, JSON.stringify(localizedResults));
+    }
     return localizedResults;
   } catch (e) {
     if (__DEV__) console.error('[Agent3] Error:', e);
@@ -1542,7 +1641,7 @@ export async function saveImageTransactions(
     : '';
   const summary = savedCount === 0
     ? "I found transactions but couldn't save them. Please try again."
-    : `Got it! I found and logged ${savedCount} transaction${savedCount > 1 ? 's' : ''} from your image:\n\n${lines.join('\n')}${failNote}`;
+    : `Got it! I found and logged ${savedCount} transaction${savedCount > 1 ? 's' : ''} from your image:\n\n${lines.join('\n\n')}${failNote}`;
 
   return { transactions: valid, summary, savedCount };
 }

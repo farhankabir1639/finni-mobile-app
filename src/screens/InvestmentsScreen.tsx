@@ -9,6 +9,9 @@ import { useProfile } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
 import { trackScreen } from '../lib/analytics';
 import { t, fonts } from '../theme/tokens';
+import Svg, {
+  Path, LinearGradient as SvgGradient, Stop, Defs, Circle as SvgCircle,
+} from 'react-native-svg';
 import Aurora from '../components/Aurora';
 import GlassCard from '../components/GlassCard';
 import Orb from '../components/Orb';
@@ -55,18 +58,120 @@ function getAbbr(inv: Investment): string {
   return inv.name.slice(0, 2).toUpperCase();
 }
 
+function fmtNum(n: number): string {
+  return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+// Glowing sparkline built from real investment timeline data
+function PortfolioSparkline({ investments }: { investments: Investment[] }) {
+  const W = SW - 92;
+  const H = 76;
+
+  const data = useMemo(() => {
+    const sorted = [...investments].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+    const now = Date.now();
+    const pts: { t: number; v: number }[] = [];
+
+    // Accumulate invested cost at each investment creation date
+    let cumCost = 0;
+    for (const inv of sorted) {
+      cumCost += inv.quantity * inv.buy_price;
+      pts.push({ t: new Date(inv.created_at).getTime(), v: cumCost });
+    }
+
+    // Current portfolio value as final point
+    const currentValue = investments.reduce((sum, inv) => sum + inv.quantity * inv.current_value, 0);
+    if (pts.length > 0 && pts[pts.length - 1].t < now) {
+      pts.push({ t: now, v: currentValue });
+    }
+
+    // If all investments share the same timestamp, spread them artificially so the chart renders
+    if (pts.length >= 2 && pts[0].t === pts[pts.length - 1].t) {
+      const span = 30 * 24 * 60 * 60 * 1000; // spread over 30 days
+      pts.forEach((p, i) => { p.t = pts[0].t + (span / (pts.length - 1)) * i; });
+      pts[pts.length - 1].t = now;
+    }
+
+    return pts;
+  }, [investments]);
+
+  if (data.length < 2) return null;
+
+  const minT = data[0].t;
+  const maxT = data[data.length - 1].t;
+  const maxV = Math.max(...data.map(d => d.v)) * 1.18;
+  const pad = H * 0.08;
+
+  const toX = (t: number) => maxT === minT ? W : ((t - minT) / (maxT - minT)) * W;
+  const toY = (v: number) => H - pad - ((v / maxV) * (H - pad * 2));
+
+  const pts = data.map(d => ({ x: toX(d.t), y: toY(d.v) }));
+
+  // Smooth cubic-bezier path
+  let line = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+  for (let i = 1; i < pts.length; i++) {
+    const p0 = pts[i - 1];
+    const p1 = pts[i];
+    const cpx = ((p0.x + p1.x) / 2).toFixed(1);
+    line += ` C ${cpx} ${p0.y.toFixed(1)} ${cpx} ${p1.y.toFixed(1)} ${p1.x.toFixed(1)} ${p1.y.toFixed(1)}`;
+  }
+  const fill = `${line} L ${pts[pts.length - 1].x.toFixed(1)} ${H} L ${pts[0].x.toFixed(1)} ${H} Z`;
+
+  const ex = pts[pts.length - 1].x;
+  const ey = pts[pts.length - 1].y;
+
+  return (
+    <Svg width={W} height={H}>
+      <Defs>
+        <SvgGradient id="sf" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0%"   stopColor="#5EEAD4" stopOpacity="0.28" />
+          <Stop offset="100%" stopColor="#5EEAD4" stopOpacity="0.00" />
+        </SvgGradient>
+      </Defs>
+      {/* Gradient fill */}
+      <Path d={fill} fill="url(#sf)" />
+      {/* Glow layers — outermost to innermost */}
+      <Path d={line} fill="none" stroke="#5EEAD4" strokeWidth={12} opacity={0.05} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d={line} fill="none" stroke="#5EEAD4" strokeWidth={6}  opacity={0.12} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d={line} fill="none" stroke="#5EEAD4" strokeWidth={2.5} opacity={1} strokeLinecap="round" strokeLinejoin="round" />
+      {/* End dot with halo */}
+      <SvgCircle cx={ex} cy={ey} r={10} fill="#5EEAD4" opacity={0.15} />
+      <SvgCircle cx={ex} cy={ey} r={5}  fill="#5EEAD4" />
+    </Svg>
+  );
+}
+
 const PRESET_TYPES = ['stock', 'crypto', 'mutual_fund', 'gold', 'bond', 'real_estate', 'other'];
 
+const toLabel = (raw: string) =>
+  raw.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
 function AssetTypeCombo({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [query, setQuery] = React.useState(value.replace(/_/g, ' '));
+  const [query, setQuery] = React.useState(toLabel(value));
   const [open, setOpen] = React.useState(false);
-  const matches = PRESET_TYPES.filter(p => p.replace(/_/g, ' ').toLowerCase().includes(query.toLowerCase()));
-  const isExact = PRESET_TYPES.some(p => p.toLowerCase() === query.toLowerCase().replace(/ /g, '_'));
-  const showCustom = query.trim().length > 0 && !isExact;
+  const [typed, setTyped] = React.useState(false);
+  const pickingRef = React.useRef(false);
+  const blurTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const matches = typed
+    ? PRESET_TYPES.filter(p => toLabel(p).toLowerCase().includes(query.toLowerCase()))
+    : PRESET_TYPES;
+  const normalised = query.trim().toLowerCase().replace(/ /g, '_');
+  const isExact = PRESET_TYPES.includes(normalised);
+  const showCustom = typed && query.trim().length > 0 && matches.length === 0;
 
   const pick = (raw: string) => {
+    // Cancel the pending blur-close — pick() will handle everything
+    if (blurTimerRef.current) {
+      clearTimeout(blurTimerRef.current);
+      blurTimerRef.current = null;
+    }
+    pickingRef.current = false;
     onChange(raw);
-    setQuery(raw.replace(/_/g, ' '));
+    setQuery(toLabel(raw));
+    setTyped(false);
     setOpen(false);
   };
 
@@ -75,24 +180,52 @@ function AssetTypeCombo({ value, onChange }: { value: string; onChange: (v: stri
       <TextInput
         style={[s.formInput, { marginBottom: 0 }]}
         value={query}
-        onChangeText={(v) => { setQuery(v); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-        placeholder="e.g. stock, crypto, gold…"
+        onChangeText={(v) => { setQuery(v); setTyped(true); setOpen(true); }}
+        onFocus={() => { setTyped(false); setOpen(true); }}
+        onBlur={() => {
+          // Move the pickingRef check INSIDE the timeout so it is evaluated after
+          // onPressIn has had a chance to fire — on Android, onBlur fires before
+          // onPressIn, so checking immediately always sees false and races.
+          blurTimerRef.current = setTimeout(() => {
+            blurTimerRef.current = null;
+            if (pickingRef.current) {
+              pickingRef.current = false;
+              return; // pick() will close and commit the value
+            }
+            setOpen(false);
+            if (query.trim()) {
+              onChange(isExact ? normalised : query.trim().toLowerCase().replace(/ /g, '_'));
+            }
+          }, 250);
+        }}
+        placeholder="e.g. Stock, Crypto, Gold…"
         placeholderTextColor={t.text3}
         autoCorrect={false}
-        autoCapitalize="none"
+        autoCapitalize="words"
       />
       {open && (matches.length > 0 || showCustom) && (
         <View style={s.comboDropdown}>
           {matches.map(p => (
-            <TouchableOpacity key={p} style={s.comboOption} onPress={() => pick(p)} activeOpacity={0.75}>
-              <Text style={s.comboOptionText}>{p.replace(/_/g, ' ')}</Text>
+            <TouchableOpacity
+              key={p}
+              style={s.comboOption}
+              onPressIn={() => { pickingRef.current = true; }}
+              onPress={() => pick(p)}
+              activeOpacity={0.75}
+            >
+              <Text style={s.comboOptionText}>{toLabel(p)}</Text>
             </TouchableOpacity>
           ))}
           {showCustom && (
-            <TouchableOpacity style={s.comboOption} onPress={() => pick(query.trim().toLowerCase().replace(/ /g, '_'))} activeOpacity={0.75}>
-              <Text style={[s.comboOptionText, { color: t.auraAqua }]}>Add as custom: "{query.trim()}"</Text>
+            <TouchableOpacity
+              style={s.comboOption}
+              onPressIn={() => { pickingRef.current = true; }}
+              onPress={() => pick(query.trim().toLowerCase().replace(/ /g, '_'))}
+              activeOpacity={0.75}
+            >
+              <Text style={[s.comboOptionText, { color: t.auraAqua }]}>
+                + Create new type: "{query.trim()}"
+              </Text>
             </TouchableOpacity>
           )}
         </View>
@@ -257,12 +390,15 @@ export default function InvestmentsScreen() {
         {/* Header */}
         <View style={s.headerRow}>
           <View>
-            <Text style={s.title}>Portfolio</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Text style={s.title}>Portfolio</Text>
+              <View style={s.betaBadge}><Text style={s.betaText}>BETA</Text></View>
+            </View>
             <Text style={s.subtitle}>Your wealth, growing</Text>
           </View>
-          <View style={s.betaBadge}>
-            <Text style={s.betaText}>BETA</Text>
-          </View>
+          <TouchableOpacity style={s.addHeaderBtn} onPress={openAdd} activeOpacity={0.8}>
+            <Text style={s.addHeaderBtnText}>+ Add</Text>
+          </TouchableOpacity>
         </View>
 
         {investments.length === 0 ? (
@@ -283,24 +419,32 @@ export default function InvestmentsScreen() {
             {/* Value hero */}
             <GlassCard style={s.heroCard}>
               <Text style={s.eyebrow}>Total Value</Text>
-              <Text style={s.heroValue}>{currencySymbol}{totalValue.toFixed(0)}</Text>
+              <Text style={s.heroValue}>{currencySymbol}{fmtNum(totalValue)}</Text>
               <View style={s.heroChangeRow}>
                 <View style={[s.changePill, { backgroundColor: isUp ? t.greenTint : t.redTint, borderColor: isUp ? 'rgba(52,211,153,0.3)' : 'rgba(251,113,133,0.3)' }]}>
                   <Text style={[s.changeText, { color: isUp ? t.green : t.red }]}>
-                    {isUp ? '↑' : '↓'} {currencySymbol}{Math.abs(totalReturn).toFixed(0)} ({totalReturnPct}%)
+                    {isUp ? '↑' : '↓'} {currencySymbol}{fmtNum(Math.abs(totalReturn))} ({totalReturnPct}%)
                   </Text>
                 </View>
                 <Text style={s.changeLabel}>all-time</Text>
               </View>
+
+              {/* Glowing portfolio sparkline */}
+              <View style={s.sparklineWrap}>
+                <PortfolioSparkline investments={investments} />
+              </View>
+
               <View style={s.heroStats}>
                 <View>
-                  <Text style={s.statLabel}>Total Invested</Text>
-                  <Text style={s.statValue}>{currencySymbol}{totalCost.toFixed(0)}</Text>
+                  <Text style={s.statLabel}>All-time return</Text>
+                  <Text style={[s.statValue, { color: isUp ? t.green : t.red }]}>
+                    {isUp ? '+' : ''}{currencySymbol}{fmtNum(totalReturn)}
+                  </Text>
                 </View>
                 <View>
-                  <Text style={s.statLabel}>Return</Text>
+                  <Text style={s.statLabel}>Growth</Text>
                   <Text style={[s.statValue, { color: isUp ? t.green : t.red }]}>
-                    {isUp ? '+' : ''}{currencySymbol}{totalReturn.toFixed(0)}
+                    {isUp ? '+' : ''}{totalReturnPct}%
                   </Text>
                 </View>
               </View>
@@ -332,9 +476,7 @@ export default function InvestmentsScreen() {
             {/* Holdings */}
             <View style={s.holdingsHeader}>
               <Text style={s.sectionTitle}>Holdings</Text>
-              <TouchableOpacity style={s.addSmallBtn} onPress={openAdd} activeOpacity={0.8}>
-                <Text style={s.addSmallBtnText}>+ Add</Text>
-              </TouchableOpacity>
+              <Text style={s.holdingsCount}>{filteredHoldings.length} assets</Text>
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }} contentContainerStyle={{ gap: 8 }}>
               {filterKinds.map((k) => {
@@ -368,7 +510,7 @@ export default function InvestmentsScreen() {
                     </View>
                     <View style={s.holdingInfo}>
                       <Text style={s.holdingName}>{inv.name}</Text>
-                      <Text style={s.holdingType}>{ASSET_LABELS[inv.asset_type] ?? inv.asset_type}</Text>
+                      <Text style={s.holdingType}>{inv.quantity} units · {ASSET_LABELS[inv.asset_type] ?? inv.asset_type}</Text>
                     </View>
                     <View style={s.holdingRight}>
                       <Text style={s.holdingValue}>{currencySymbol}{value.toFixed(0)}</Text>
@@ -381,18 +523,9 @@ export default function InvestmentsScreen() {
               );
             })}
 
-            {/* Connect brokerage CTA */}
-            <TouchableOpacity onPress={() => Alert.alert('Coming Soon', "We're working on brokerage integration. We'll notify you when it's ready!")} activeOpacity={0.7}>
-              <GlassCard style={s.connectCard}>
-                <View style={s.connectIcon}>
-                  <Text style={{ fontSize: 22, color: t.auraAqua }}>+</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.connectTitle}>Connect a brokerage</Text>
-                  <Text style={s.connectSub}>Auto-sync holdings & live prices</Text>
-                </View>
-                <Text style={{ fontSize: 20, color: t.text3 }}>→</Text>
-              </GlassCard>
+            {/* Add investment pill */}
+            <TouchableOpacity style={s.addInvBtn} onPress={openAdd} activeOpacity={0.8}>
+              <Text style={s.addInvBtnText}>+ Add investment</Text>
             </TouchableOpacity>
             {/* Disclaimer */}
             <Text style={s.disclaimer}>
@@ -489,7 +622,7 @@ export default function InvestmentsScreen() {
                 <Text style={s.closeBtnText}>✕</Text>
               </TouchableOpacity>
             </View>
-            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 22, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 22, paddingBottom: 100 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <Text style={s.formLabel}>Name *</Text>
               <TextInput style={s.formInput} placeholder="e.g. Grameenphone" placeholderTextColor={t.text3} value={formName} onChangeText={setFormName} />
 
@@ -570,7 +703,8 @@ const s = StyleSheet.create({
   },
   changeText: { fontSize: 13, fontFamily: fonts.bold, fontWeight: '700' },
   changeLabel: { fontSize: 13, fontFamily: fonts.medium, color: t.text3 },
-  heroStats: { flexDirection: 'row', gap: 22, marginTop: 16 },
+  sparklineWrap: { marginTop: 18, marginBottom: 4, marginHorizontal: -4 },
+  heroStats: { flexDirection: 'row', gap: 28, marginTop: 16 },
   statLabel: { fontSize: 11.5, fontFamily: fonts.medium, color: t.text3 },
   statValue: { fontSize: 16, fontFamily: fonts.extraBold, fontWeight: '800', color: t.text, marginTop: 4 },
 
@@ -586,13 +720,16 @@ const s = StyleSheet.create({
 
   // Holdings
   holdingsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  addSmallBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: t.rSm, backgroundColor: t.glass, borderWidth: 1, borderColor: t.glassLine },
-  addSmallBtnText: { fontSize: 13, fontFamily: fonts.semiBold, fontWeight: '600', color: t.text2 },
+  addHeaderBtn: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: t.rPill, backgroundColor: t.auraAqua },
+  addHeaderBtnText: { fontSize: 14, fontFamily: fonts.semiBold, fontWeight: '600', color: '#07070E' },
+  addInvBtn: { marginTop: 16, paddingVertical: 15, borderRadius: t.rMd, borderWidth: 1, borderColor: t.auraAqua, alignItems: 'center' },
+  addInvBtnText: { fontSize: 15, fontFamily: fonts.semiBold, fontWeight: '600', color: t.auraAqua },
   chip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: t.rPill, backgroundColor: t.glass, borderWidth: 1, borderColor: t.glassLine },
-  chipActive: { backgroundColor: t.auraIndigo, borderColor: 'transparent' },
+  chipActive: { backgroundColor: t.auraAqua, borderColor: 'transparent' },
   chipText: { fontSize: 14, fontFamily: fonts.semiBold, fontWeight: '600', color: t.text2 },
-  chipTextActive: { color: '#fff', fontWeight: '700' },
+  chipTextActive: { color: '#07070E', fontWeight: '700' },
 
+  holdingsCount: { fontSize: 13, fontFamily: fonts.medium, color: t.text3 },
   holdingCard: { flexDirection: 'row', alignItems: 'center', gap: 13, padding: 13, paddingHorizontal: 15, marginBottom: 10 },
   holdingIcon: { width: 44, height: 44, borderRadius: 13, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   holdingAbbr: { fontSize: 15, fontFamily: fonts.extraBold, fontWeight: '800' },
@@ -602,12 +739,6 @@ const s = StyleSheet.create({
   holdingRight: { alignItems: 'flex-end' },
   holdingValue: { fontSize: 15, fontFamily: fonts.extraBold, fontWeight: '800', color: t.text },
   holdingChg: { fontSize: 12.5, fontFamily: fonts.bold, fontWeight: '700', marginTop: 3 },
-
-  // Connect CTA
-  connectCard: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18, marginTop: 16 },
-  connectIcon: { width: 44, height: 44, borderRadius: 13, backgroundColor: t.cyanTint, alignItems: 'center', justifyContent: 'center' },
-  connectTitle: { fontSize: 15, fontFamily: fonts.semiBold, fontWeight: '600', color: t.text },
-  connectSub: { fontSize: 13, fontFamily: fonts.medium, color: t.text3, marginTop: 2 },
 
   // Combo dropdown
   comboDropdown: {
@@ -645,7 +776,6 @@ const s = StyleSheet.create({
   closeBtnText: { fontSize: 18, fontWeight: '600', color: t.text2 },
   formLabel: { fontSize: 11, fontFamily: fonts.semiBold, fontWeight: '600', letterSpacing: 1.5, textTransform: 'uppercase', color: t.text3, marginBottom: 10 },
   formInput: { backgroundColor: t.glass, borderWidth: 1, borderColor: t.glassLine, borderRadius: t.rMd, paddingHorizontal: 16, paddingVertical: 14, fontSize: 15.5, fontFamily: fonts.medium, fontWeight: '500', color: t.text, marginBottom: 14 },
-  typeRow: { flexDirection: 'row', gap: 6, marginBottom: 14, flexWrap: 'wrap' },
   saveBtn: { marginTop: 8, paddingVertical: 16, borderRadius: t.rMd, backgroundColor: t.auraIndigo, alignItems: 'center' },
   saveBtnText: { fontSize: 16, fontFamily: fonts.bold, fontWeight: '700', color: '#fff' },
   deleteBtn: { marginTop: 16, paddingVertical: 14, alignItems: 'center' },

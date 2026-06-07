@@ -144,7 +144,7 @@ const aiStyles = StyleSheet.create({
 
 // ── Main Screen ───────────────────────────────────────────────────────────────
 // GlassDock content height: paddingVertical(10*2) + tabPadding(4*2) + icon(22) + gap(4) + label(12) ≈ 70px
-const DOCK_CONTENT_H = 70;
+const DOCK_CONTENT_H = 86;
 
 export default function HomeScreen() {
   const navigation = useNavigation();
@@ -500,9 +500,12 @@ export default function HomeScreen() {
       setIsTyping(true);
       const extraction = await saveImageTransactions(parsed, user.id, chatContext.profile?.currency ?? 'USD', activeSessionDate ?? undefined);
       const aiMsg: Message = { id: (Date.now() + 1).toString(), role: 'assistant', content: extraction.summary, timestamp: new Date().toISOString() };
-      const updated = [...messages, userMsg, aiMsg];
-      setMessages(updated);
-      saveSession(user.id, updated as SessionMessage[], activeSessionDate ?? undefined);
+      // Use functional form to get current state — avoids stale closure over `messages`
+      setMessages(m => {
+        const updated = [...m, aiMsg];
+        saveSession(user.id, updated as SessionMessage[], activeSessionDate ?? undefined);
+        return updated;
+      });
       if (extraction.savedCount > 0) { await markImageTxUsed(user.id); fetchStats(); fetchChatContext(); trackEvent('image_transactions_logged', { count: extraction.savedCount }); }
     } catch (e) {
       captureError(e, { context: 'handleImagePick', userId: user.id });
@@ -563,6 +566,7 @@ export default function HomeScreen() {
   const isConversationEmpty = messages.length <= 1;
   const busy = isTyping || isProcessingImage;
 
+
   // ── Composer pieces ────────────────────────────────────────────────────────
   const composerInner = (
     <>
@@ -617,67 +621,6 @@ export default function HomeScreen() {
               </Pressable>
             </View>
 
-            {/* ArcMeter hero */}
-            <View style={styles.arcSection}>
-              <ArcMeter size={244} stroke={13} pct={monthUsedPct} markerPct={monthElapsedPct}>
-                <Orb size={104} rings talking={isTyping} />
-              </ArcMeter>
-
-              {/* Big monetary hero */}
-              {monthlyBudget > 0 ? (
-                <>
-                  <Text style={[styles.heroAmount, { fontFamily: fonts.extraBold }]}>
-                    {currencySymbol}{budgetLeft.toFixed(0)}
-                  </Text>
-                  <Text style={[styles.heroSub, { fontFamily: fonts.medium }]}>
-                    left of your {currencySymbol}{monthlyBudget.toFixed(0)} budget
-                  </Text>
-                </>
-              ) : (
-                <Text style={[styles.heroSub, { fontFamily: fonts.medium }]}>
-                  Add income in Settings to track budget
-                </Text>
-              )}
-
-              {/* Legend: % spent + % of month */}
-              {monthlyBudget > 0 && (
-                <View style={styles.legendRow}>
-                  <LinearGradient
-                    colors={[t.auraAqua, '#a5b4fc']}
-                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                    style={styles.legendSwatch}
-                  />
-                  <Text style={[styles.legendText, { fontFamily: fonts.medium }]}>{monthUsedPct}% spent</Text>
-                  <View style={styles.legendWhiteDot} />
-                  <Text style={[styles.legendText, { fontFamily: fonts.medium }]}>{monthElapsedPct}% of {monthName}</Text>
-                </View>
-              )}
-
-              {/* Pace pill */}
-              <View style={[styles.pacePill, onTrack ? styles.pacePillGreen : styles.pacePillRed]}>
-                <View style={[styles.paceDot, { backgroundColor: onTrack ? t.green : t.red }]} />
-                <Text style={[styles.paceText, { fontFamily: fonts.semiBold, color: onTrack ? t.green : t.red }]}>
-                  {onTrack ? 'On track' : 'Over pace'}
-                </Text>
-              </View>
-            </View>
-
-            {/* Finni noticed card */}
-            {finnisNoticed ? (
-              <TouchableOpacity
-                style={styles.noticedWrap}
-                onPress={() => navigation.navigate('Analytics' as never)}
-                activeOpacity={0.85}
-              >
-                <GlassCard style={styles.noticedCard} borderRadius={t.rLg} intensity={22}>
-                  <View style={styles.noticedTop}>
-                    <Text style={[styles.noticedBadge, { fontFamily: fonts.semiBold }]}>✦ Finni noticed</Text>
-                    <Text style={styles.noticedArrow}>→</Text>
-                  </View>
-                  <Text style={[styles.noticedText, { fontFamily: fonts.regular }]}>{finnisNoticed}</Text>
-                </GlassCard>
-              </TouchableOpacity>
-            ) : null}
 
             {/* Session banner */}
             {activeSessionDate ? (
@@ -692,8 +635,6 @@ export default function HomeScreen() {
             ) : null}
           </Pressable>
 
-          <View style={styles.divider} />
-
           {/* ── CHAT SCROLL ── */}
           <ScrollView
             ref={scrollRef}
@@ -703,6 +644,66 @@ export default function HomeScreen() {
             keyboardDismissMode="on-drag"
             keyboardShouldPersistTaps="handled"
           >
+            {/* Hero — lives inside scroll so it naturally slides away as chat grows */}
+            <View style={styles.heroSection}>
+              <View style={styles.arcSection}>
+                <ArcMeter size={244} stroke={13} pct={monthUsedPct} markerPct={monthElapsedPct}>
+                  <Orb size={104} rings talking={isTyping} />
+                </ArcMeter>
+
+                {monthlyBudget > 0 ? (
+                  <>
+                    <Text allowFontScaling={false} style={[styles.heroAmount, { fontFamily: fonts.extraBold }]}>
+                      {currencySymbol}{budgetLeft.toFixed(0)}
+                    </Text>
+                    <Text allowFontScaling={false} style={[styles.heroSub, { fontFamily: fonts.medium }]}>
+                      left of your {currencySymbol}{monthlyBudget.toFixed(0)} budget
+                    </Text>
+                  </>
+                ) : (
+                  <Text allowFontScaling={false} style={[styles.heroSub, { fontFamily: fonts.medium }]}>
+                    Add income in Settings to track budget
+                  </Text>
+                )}
+
+                {monthlyBudget > 0 && (
+                  <View style={styles.legendRow}>
+                    <LinearGradient
+                      colors={[t.auraAqua, '#a5b4fc']}
+                      start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                      style={styles.legendSwatch}
+                    />
+                    <Text allowFontScaling={false} style={[styles.legendText, { fontFamily: fonts.medium }]}>{monthUsedPct}% spent</Text>
+                    <View style={styles.legendWhiteDot} />
+                    <Text allowFontScaling={false} style={[styles.legendText, { fontFamily: fonts.medium }]}>{monthElapsedPct}% of {monthName}</Text>
+                  </View>
+                )}
+
+                <View style={[styles.pacePill, onTrack ? styles.pacePillGreen : styles.pacePillRed]}>
+                  <View style={[styles.paceDot, { backgroundColor: onTrack ? t.green : t.red }]} />
+                  <Text allowFontScaling={false} style={[styles.paceText, { fontFamily: fonts.semiBold, color: onTrack ? t.green : t.red }]}>
+                    {onTrack ? 'On track' : 'Over pace'}
+                  </Text>
+                </View>
+              </View>
+
+              {finnisNoticed ? (
+                <TouchableOpacity
+                  style={styles.noticedWrap}
+                  onPress={() => navigation.navigate('Analytics' as never)}
+                  activeOpacity={0.85}
+                >
+                  <GlassCard style={styles.noticedCard} borderRadius={t.rLg} intensity={22}>
+                    <View style={styles.noticedTop}>
+                      <Text style={[styles.noticedBadge, { fontFamily: fonts.semiBold }]}>✦ Finni noticed</Text>
+                      <Text style={styles.noticedArrow}>→</Text>
+                    </View>
+                    <Text style={[styles.noticedText, { fontFamily: fonts.regular }]}>{finnisNoticed}</Text>
+                  </GlassCard>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+
             {/* Inline chips — empty state */}
             {isConversationEmpty && (
               <View style={styles.chipsSection}>
@@ -867,11 +868,12 @@ const styles = StyleSheet.create({
   sessionBannerTxt: { fontSize: 13, color: t.indigoBright },
   sessionBannerBack: { fontSize: 12, color: t.text2 },
 
-  divider: { height: 1, backgroundColor: t.line, marginHorizontal: 0 },
+  // Hero inside scroll
+  heroSection: { paddingHorizontal: 4, paddingBottom: 16 },
 
   // Chat
   chatScroll: { flex: 1 },
-  chatContent: { padding: 16, paddingBottom: 24 },
+  chatContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16 },
 
   chipsSection: { marginBottom: 20, gap: 10 },
   tryAskLabel: { fontSize: 12, color: t.text3, letterSpacing: 0.3, textTransform: 'uppercase' },
