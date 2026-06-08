@@ -3,10 +3,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity,
   Pressable, KeyboardAvoidingView, Platform, Modal, Alert,
-  ActionSheetIOS, Linking, Animated, useWindowDimensions, Keyboard,
+  Linking, Animated, useWindowDimensions, Keyboard,
 } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
-import * as ImageManipulator from 'expo-image-manipulator';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { BlurView } from 'expo-blur';
@@ -17,10 +15,7 @@ import Svg, { Path, Circle as SvgCircle } from 'react-native-svg';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfile } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
-import {
-  chatAgent, parseTransactionsFromImage, saveImageTransactions,
-  checkImageTxLimit, markImageTxUsed, transcribeAudio,
-} from '../lib/agents';
+import { chatAgent, transcribeAudio } from '../lib/agents';
 import { seedDefaultCategories } from '../lib/seedCategories';
 import { captureError } from '../lib/sentry';
 import { trackEvent, trackScreen } from '../lib/analytics';
@@ -70,12 +65,6 @@ const ClockIcon = ({ color = t.text2 }: { color?: string }) => (
   <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
     <SvgCircle cx="12" cy="12" r="9" stroke={color} strokeWidth="1.8" />
     <Path d="M12 7v5l3 3" stroke={color} strokeWidth="1.8" strokeLinecap="round" />
-  </Svg>
-);
-const CameraIcon = ({ color = t.text2 }: { color?: string }) => (
-  <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-    <Path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" stroke={color} strokeWidth="1.7" strokeLinecap="round" />
-    <SvgCircle cx="12" cy="13" r="4" stroke={color} strokeWidth="1.7" />
   </Svg>
 );
 const MicIcon = ({ color = t.text2 }: { color?: string }) => (
@@ -172,7 +161,6 @@ export default function HomeScreen() {
   const [showHistory, setShowHistory]           = useState(false);
   const [historySessions, setHistorySessions]   = useState<ChatSession[]>([]);
   const [activeSessionDate, setActiveSessionDate] = useState<string | null>(null);
-  const [isProcessingImage, setIsProcessingImage] = useState(false);
   const [isRecording, setIsRecording]           = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
 
@@ -458,61 +446,6 @@ export default function HomeScreen() {
     finally { setIsTyping(false); isSendingRef.current = false; }
   }, [messages, user?.id, chatContext, activeSessionDate]);
 
-  const handleImagePick = async (useCamera: boolean) => {
-    if (!user?.id || isProcessingImage || isSendingRef.current) return;
-    const used = await checkImageTxLimit(user.id);
-    if (used) { Alert.alert('Daily limit reached', 'You can scan 1 image per day. Come back tomorrow!'); return; }
-    if (useCamera) {
-      const perm = await ImagePicker.requestCameraPermissionsAsync();
-      if (!perm.granted) { Alert.alert('Permission required', 'Camera access is needed to take photos.'); return; }
-    }
-    const result = useCamera
-      ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.7 })
-      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
-    if (result.canceled || !result.assets?.[0]) return;
-    setIsProcessingImage(true);
-    isSendingRef.current = true;
-    const userMsg: Message = { id: Date.now().toString(), role: 'user', content: '📷 Scanning image for transactions...', timestamp: new Date().toISOString() };
-    setMessages(m => [...m, userMsg]);
-    setIsTyping(true);
-    try {
-      const comp = await ImageManipulator.manipulateAsync(
-        result.assets[0].uri, [{ resize: { width: 1024 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
-      );
-      if (!comp.base64) throw new Error('Failed to process image');
-      const parsed = await parseTransactionsFromImage(comp.base64, 'image/jpeg');
-      if (parsed.length === 0) {
-        const aiMsg: Message = { id: (Date.now() + 1).toString(), role: 'assistant', content: "I couldn't find any transactions in that image. Try a clearer photo.", timestamp: new Date().toISOString() };
-        const updated = [...messages, userMsg, aiMsg];
-        setMessages(updated);
-        saveSession(user.id, updated as SessionMessage[], activeSessionDate ?? undefined);
-        return;
-      }
-      setIsTyping(false);
-      const lines = parsed.map(tx => `• ${tx.description}: ${tx.type === 'income' ? '+' : '-'}${currencySymbol}${tx.amount.toFixed(2)} (${tx.category ?? 'Other'})`).join('\n');
-      const confirmed = await new Promise<boolean>(resolve => {
-        Alert.alert(`Found ${parsed.length} transaction${parsed.length > 1 ? 's' : ''}`, `${lines}\n\nSave all to your account?`, [
-          { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-          { text: 'Save All', onPress: () => resolve(true) },
-        ], { cancelable: true, onDismiss: () => resolve(false) });
-      });
-      if (!confirmed) { setMessages(messages); return; }
-      setIsTyping(true);
-      const extraction = await saveImageTransactions(parsed, user.id, chatContext.profile?.currency ?? 'USD', activeSessionDate ?? undefined);
-      const aiMsg: Message = { id: (Date.now() + 1).toString(), role: 'assistant', content: extraction.summary, timestamp: new Date().toISOString() };
-      // Use functional form to get current state — avoids stale closure over `messages`
-      setMessages(m => {
-        const updated = [...m, aiMsg];
-        saveSession(user.id, updated as SessionMessage[], activeSessionDate ?? undefined);
-        return updated;
-      });
-      if (extraction.savedCount > 0) { await markImageTxUsed(user.id); fetchStats(); fetchChatContext(); trackEvent('image_transactions_logged', { count: extraction.savedCount }); }
-    } catch (e) {
-      captureError(e, { context: 'handleImagePick', userId: user.id });
-      setMessages(m => [...m, { id: (Date.now() + 1).toString(), role: 'assistant', content: "I couldn't process that image. Please try again 🔄" }]);
-    } finally { setIsTyping(false); setIsProcessingImage(false); isSendingRef.current = false; }
-  };
-
   const handleReportMessage = (msg: Message) => {
     Alert.alert('Report AI Response', 'Flag this response as inappropriate, inaccurate, or offensive.', [
       { text: 'Cancel', style: 'cancel' },
@@ -523,21 +456,6 @@ export default function HomeScreen() {
         Alert.alert('Thank you', 'Your report helps us improve Finni.');
       }},
     ]);
-  };
-
-  const showImageOptions = () => {
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions({ options: ['Cancel', 'Take Photo', 'Choose from Library'], cancelButtonIndex: 0 }, i => {
-        if (i === 1) handleImagePick(true);
-        else if (i === 2) handleImagePick(false);
-      });
-    } else {
-      Alert.alert('Scan Transactions', 'Choose an option', [
-        { text: 'Take Photo', onPress: () => handleImagePick(true) },
-        { text: 'Choose from Library', onPress: () => handleImagePick(false) },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
-    }
   };
 
   const handleChipPress = (chip: string) => handleSend(chip.replace(/^[^\s]+\s/, '').trim());
@@ -564,15 +482,12 @@ export default function HomeScreen() {
   };
 
   const isConversationEmpty = messages.length <= 1;
-  const busy = isTyping || isProcessingImage;
+  const busy = isTyping;
 
 
   // ── Composer pieces ────────────────────────────────────────────────────────
   const composerInner = (
     <>
-      <TouchableOpacity style={styles.composerBtn} onPress={showImageOptions} disabled={busy} activeOpacity={0.7}>
-        <CameraIcon color={busy ? t.text3 : t.text2} />
-      </TouchableOpacity>
       <TextInput
         style={[styles.composerInput, { fontFamily: fonts.regular }]}
         placeholder="Message Finni…"
