@@ -60,7 +60,8 @@
           "cameraPermission": "Finni uses the camera to photograph receipts and extract transactions automatically."
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      "./plugins/strip-media-permissions"
     ]
   }
 }
