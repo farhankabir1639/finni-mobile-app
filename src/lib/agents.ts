@@ -220,7 +220,7 @@ Input: ${input}`;
 // Bypasses the Supabase proxy so Supabase edge function timeouts can't truncate
 // the response mid-JSON. Uses a bounded thinking budget (1024 tokens) so the
 // model still reasons about spending patterns without taking 30+ seconds.
-async function callInsightsDirect(prompt: string): Promise<string> {
+async function callInsightsDirect(prompt: string, retryCount = 0): Promise<string> {
   if (!GEMINI_DIRECT_URL && !GEMINI_PROXY_URL) throw new Error('Gemini is not configured');
 
   const body = JSON.stringify({
@@ -262,6 +262,15 @@ async function callInsightsDirect(prompt: string): Promise<string> {
     }
 
     clearTimeout(timeoutId);
+
+    // Retry on 503 (overload) and 429 (rate limit) with backoff
+    if ((res.status === 503 || res.status === 429) && retryCount < 3) {
+      const delay = RETRY_DELAYS[retryCount];
+      if (__DEV__) console.log(`[Insights] ${res.status}, retrying in ${delay}ms (attempt ${retryCount + 1}/3)`);
+      await new Promise((r) => setTimeout(r, delay));
+      return callInsightsDirect(prompt, retryCount + 1);
+    }
+
     if (!res.ok) throw new Error(`Gemini insights error: ${res.status}`);
     const data = await res.json();
     return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';

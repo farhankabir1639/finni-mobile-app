@@ -36,7 +36,6 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.10",
-    "jimp": "^1.6.1",
     "typescript": "~5.9.2"
   },
   "private": true
