@@ -5,8 +5,7 @@ import {
   Pressable, KeyboardAvoidingView, Platform, Modal, Alert,
   Linking, Animated, useWindowDimensions, Keyboard,
 } from 'react-native';
-import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system/legacy';
+import { useAudioRecorder, RecordingPresets, setAudioModeAsync, requestRecordingPermissionsAsync } from 'expo-audio';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -169,7 +168,7 @@ export default function HomeScreen() {
   const isSendingRef      = useRef(false);
   const isFetchingCtxRef  = useRef(false);
   const recordingTimer    = useRef<ReturnType<typeof setInterval> | null>(null);
-  const audioRecording    = useRef<Audio.Recording | null>(null);
+  const audioRecorder     = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const waveAnims         = useRef([...Array(5)].map(() => new Animated.Value(0.4))).current;
   const waveLoopsRef      = useRef<Animated.CompositeAnimation[]>([]);
 
@@ -217,32 +216,26 @@ export default function HomeScreen() {
   useEffect(() => {
     return () => {
       if (recordingTimer.current) { clearInterval(recordingTimer.current); recordingTimer.current = null; }
-      if (audioRecording.current) {
-        audioRecording.current.stopAndUnloadAsync().catch(() => {});
-        audioRecording.current = null;
-      }
+      audioRecorder.stop().catch(() => {});
     };
   }, []);
 
   const startRecording = async () => {
     try {
-      const perm = await Audio.requestPermissionsAsync();
+      const perm = await requestRecordingPermissionsAsync();
       if (!perm.granted) {
         Alert.alert('Microphone Access', 'Please allow microphone access in Settings to use voice input.');
         return;
       }
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
-      audioRecording.current = recording;
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await audioRecorder.prepareToRecordAsync();
+      audioRecorder.record();
       setIsRecording(true);
       setRecordingSeconds(0);
       recordingTimer.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000);
       trackEvent('voice_input_started');
     } catch (e) {
-      // Reset audio mode if recording creation failed
-      try { await Audio.setAudioModeAsync({ allowsRecordingIOS: false }); } catch {}
+      try { await setAudioModeAsync({ allowsRecording: false }); } catch {}
       if (__DEV__) console.error('[Voice] Start recording error:', e);
       captureError(e, { context: 'startRecording' });
       Alert.alert('Error', 'Could not start recording. Please try again.');
@@ -253,34 +246,40 @@ export default function HomeScreen() {
     setIsRecording(false);
     setRecordingSeconds(0);
     if (recordingTimer.current) { clearInterval(recordingTimer.current); recordingTimer.current = null; }
-    if (audioRecording.current) {
-      try { await audioRecording.current.stopAndUnloadAsync(); } catch {}
-      audioRecording.current = null;
-    }
-    await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+    try { await audioRecorder.stop(); } catch {}
+    await setAudioModeAsync({ allowsRecording: false });
   };
 
   const stopRecording = async () => {
-    if (!audioRecording.current) { cancelRecording(); return; }
+    if (!isRecording) { cancelRecording(); return; }
     setIsRecording(false);
     if (recordingTimer.current) { clearInterval(recordingTimer.current); recordingTimer.current = null; }
 
     try {
-      await audioRecording.current.stopAndUnloadAsync();
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
-      const uri = audioRecording.current.getURI();
-      audioRecording.current = null;
+      await audioRecorder.stop();
+      await setAudioModeAsync({ allowsRecording: false });
+      const uri = audioRecorder.uri;
 
       if (!uri) { Alert.alert('Error', 'No audio recorded.'); return; }
 
-      // Read audio as base64
-      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+      // Read audio as base64 via fetch + FileReader (no expo-file-system needed)
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          resolve(dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+
       if (!base64 || base64.length < 100) {
         Alert.alert('Too Short', 'Recording was too short. Please try again.');
         return;
       }
 
-      // Transcribe via Gemini (M4A container uses AAC codec — send as audio/mp4)
       setIsTyping(true);
       const transcribed = await transcribeAudio(base64, 'audio/mp4');
       setIsTyping(false);
@@ -291,16 +290,13 @@ export default function HomeScreen() {
       }
 
       trackEvent('voice_input_transcribed', { length: transcribed.length });
-      // Feed transcribed text into chat — guard against concurrent sends
       if (!isSendingRef.current) {
         handleSend(transcribed);
       } else {
-        // A manual send is already in flight — show transcribed text for user to send manually
         setInputText(transcribed);
       }
     } catch (e) {
       setIsTyping(false);
-      audioRecording.current = null;
       if (__DEV__) console.error('[Voice] Transcription error:', e);
       captureError(e, { context: 'stopRecording' });
       Alert.alert('Error', 'Could not process voice message. Please try typing instead.');

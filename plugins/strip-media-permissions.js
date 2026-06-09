@@ -5,9 +5,8 @@ const { withAndroidManifest } = require('expo/config-plugins');
  * READ_MEDIA_VIDEO, READ_EXTERNAL_STORAGE, and WRITE_EXTERNAL_STORAGE
  * from the final AndroidManifest.xml.
  *
- * These get auto-added by expo-file-system and expo-image-picker, and on
- * SDK 33+ the build toolchain can upgrade READ_EXTERNAL_STORAGE into
- * READ_MEDIA_* variants — which bypasses Expo's blockedPermissions list.
+ * Belt-and-suspenders guard in case any transitive dependency re-adds these
+ * via its AAR manifest after expo-av and expo-file-system were removed.
  */
 const PERMISSIONS_TO_STRIP = [
   'android.permission.READ_MEDIA_IMAGES',
