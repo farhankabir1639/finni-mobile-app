@@ -5,7 +5,8 @@ import {
   Pressable, KeyboardAvoidingView, Platform, Modal, Alert,
   Linking, Animated, useWindowDimensions, Keyboard,
 } from 'react-native';
-import { useAudioRecorder, RecordingPresets, setAudioModeAsync, requestRecordingPermissionsAsync } from 'expo-audio';
+// expo-audio is loaded lazily inside recording functions so a native-module
+// failure on certain devices doesn't crash the entire app on startup.
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -168,7 +169,7 @@ export default function HomeScreen() {
   const isSendingRef      = useRef(false);
   const isFetchingCtxRef  = useRef(false);
   const recordingTimer    = useRef<ReturnType<typeof setInterval> | null>(null);
-  const audioRecorder     = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const audioRecorderRef  = useRef<any>(null);
   const waveAnims         = useRef([...Array(5)].map(() => new Animated.Value(0.4))).current;
   const waveLoopsRef      = useRef<Animated.CompositeAnimation[]>([]);
 
@@ -216,26 +217,41 @@ export default function HomeScreen() {
   useEffect(() => {
     return () => {
       if (recordingTimer.current) { clearInterval(recordingTimer.current); recordingTimer.current = null; }
-      audioRecorder.stop().catch(() => {});
+      audioRecorderRef.current?.stop?.().catch(() => {});
+      audioRecorderRef.current?.release?.();
+      audioRecorderRef.current = null;
     };
   }, []);
 
   const startRecording = async () => {
     try {
+      // Lazy-load expo-audio so a native-module failure on this device doesn't
+      // crash the app on startup — only the mic button is affected.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { AudioModule, RecordingPresets, setAudioModeAsync, requestRecordingPermissionsAsync } = require('expo-audio') as typeof import('expo-audio');
+
       const perm = await requestRecordingPermissionsAsync();
       if (!perm.granted) {
         Alert.alert('Microphone Access', 'Please allow microphone access in Settings to use voice input.');
         return;
       }
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-      await audioRecorder.prepareToRecordAsync();
-      audioRecorder.record();
+
+      // Release any previous recorder before creating a new one
+      audioRecorderRef.current?.release?.();
+      const recorder = new AudioModule.AudioRecorder(RecordingPresets.HIGH_QUALITY);
+      audioRecorderRef.current = recorder;
+
+      await recorder.prepareToRecordAsync();
+      recorder.record();
       setIsRecording(true);
       setRecordingSeconds(0);
       recordingTimer.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000);
       trackEvent('voice_input_started');
     } catch (e) {
-      try { await setAudioModeAsync({ allowsRecording: false }); } catch {}
+      audioRecorderRef.current?.release?.();
+      audioRecorderRef.current = null;
+      try { const { setAudioModeAsync } = require('expo-audio') as typeof import('expo-audio'); await setAudioModeAsync({ allowsRecording: false }); } catch {}
       if (__DEV__) console.error('[Voice] Start recording error:', e);
       captureError(e, { context: 'startRecording' });
       Alert.alert('Error', 'Could not start recording. Please try again.');
@@ -246,8 +262,10 @@ export default function HomeScreen() {
     setIsRecording(false);
     setRecordingSeconds(0);
     if (recordingTimer.current) { clearInterval(recordingTimer.current); recordingTimer.current = null; }
-    try { await audioRecorder.stop(); } catch {}
-    await setAudioModeAsync({ allowsRecording: false });
+    try { await audioRecorderRef.current?.stop(); } catch {}
+    audioRecorderRef.current?.release?.();
+    audioRecorderRef.current = null;
+    try { const { setAudioModeAsync } = require('expo-audio') as typeof import('expo-audio'); await setAudioModeAsync({ allowsRecording: false }); } catch {}
   };
 
   const stopRecording = async () => {
@@ -256,9 +274,13 @@ export default function HomeScreen() {
     if (recordingTimer.current) { clearInterval(recordingTimer.current); recordingTimer.current = null; }
 
     try {
-      await audioRecorder.stop();
-      await setAudioModeAsync({ allowsRecording: false });
-      const uri = audioRecorder.uri;
+      const recorder = audioRecorderRef.current;
+      if (!recorder) { Alert.alert('Error', 'No active recording.'); return; }
+      await recorder.stop();
+      const uri = recorder.uri;
+      audioRecorderRef.current?.release?.();
+      audioRecorderRef.current = null;
+      try { const { setAudioModeAsync } = require('expo-audio') as typeof import('expo-audio'); await setAudioModeAsync({ allowsRecording: false }); } catch {}
 
       if (!uri) { Alert.alert('Error', 'No audio recorded.'); return; }
 
