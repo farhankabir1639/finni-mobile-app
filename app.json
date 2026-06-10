@@ -53,8 +53,7 @@
     "plugins": [
       "expo-localization",
       "expo-web-browser",
-      "./plugins/strip-media-permissions",
-      "expo-audio"
+      "./plugins/strip-media-permissions"
     ]
   }
 }
