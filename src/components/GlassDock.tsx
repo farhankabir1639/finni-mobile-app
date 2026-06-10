@@ -59,7 +59,7 @@ function IconSettings({ color }: { color: string }) {
   );
 }
 
-const TAB_ICONS: Record<string, (props: { color: string }) => JSX.Element> = {
+const TAB_ICONS: Record<string, (props: { color: string }) => React.ReactElement> = {
   Home:         ({ color }) => <IconHome color={color} />,
   Transactions: ({ color }) => <IconTransactions color={color} />,
   Analytics:    ({ color }) => <IconAnalytics color={color} />,
