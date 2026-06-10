@@ -14,6 +14,9 @@ const PERMISSIONS_TO_STRIP = [
   'android.permission.READ_MEDIA_AUDIO',
   'android.permission.READ_EXTERNAL_STORAGE',
   'android.permission.WRITE_EXTERNAL_STORAGE',
+  // expo-audio declares this for background playback; Finni only records short
+  // voice clips for transcription and never plays audio in the background.
+  'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
 ];
 
 function stripMediaPermissions(config) {
