@@ -229,6 +229,10 @@ export default function HomeScreen() {
       // crash the app on startup — only the mic button is affected.
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { AudioModule, RecordingPresets, setAudioModeAsync, requestRecordingPermissionsAsync } = require('expo-audio') as typeof import('expo-audio');
+      // createRecordingOptions flattens the platform-specific sub-object (android/ios/web)
+      // into a single object the native AudioRecorder constructor expects.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { createRecordingOptions } = require('expo-audio/build/utils/options') as { createRecordingOptions: (o: any) => any };
 
       const perm = await requestRecordingPermissionsAsync();
       if (!perm.granted) {
@@ -239,7 +243,7 @@ export default function HomeScreen() {
 
       // Release any previous recorder before creating a new one
       audioRecorderRef.current?.release?.();
-      const recorder = new AudioModule.AudioRecorder(RecordingPresets.HIGH_QUALITY);
+      const recorder = new AudioModule.AudioRecorder(createRecordingOptions(RecordingPresets.HIGH_QUALITY));
       audioRecorderRef.current = recorder;
 
       await recorder.prepareToRecordAsync();
