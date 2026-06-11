@@ -2,7 +2,7 @@
   "expo": {
     "name": "Finni",
     "slug": "heyfinni",
-    "owner": "heyfinniai",
+    "owner": "farhankabir1111",
     "version": "1.0.0",
     "description": "AI-powered personal finance assistant. Track expenses, manage budgets, and reach your financial goals.",
     "orientation": "portrait",
@@ -21,11 +21,12 @@
     "newArchEnabled": true,
     "android": {
       "package": "com.finni.app",
-      "versionCode": 3,
+      "versionCode": 25,
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "blockedPermissions": [
         "android.permission.READ_MEDIA_IMAGES",
@@ -43,7 +44,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "e321e1be-455d-404c-95a9-aa6c02be4bd6"
+        "projectId": "ff04cf2f-5e5f-4e65-bfc8-3ce30d091e10"
       },
       "privacyPolicyUrl": "https://www.heyfinni.com/privacy-policy",
       "termsOfServiceUrl": "https://www.heyfinni.com/terms",
@@ -56,10 +57,13 @@
       "./plugins/strip-media-permissions",
       "expo-asset",
       "expo-audio",
-      ["@sentry/react-native", {
-        "organization": "finni-vb",
-        "project": "react-native"
-      }]
+      [
+        "@sentry/react-native",
+        {
+          "organization": "finni-vb",
+          "project": "react-native"
+        }
+      ]
     ]
   }
 }
