@@ -55,7 +55,11 @@
       "expo-web-browser",
       "./plugins/strip-media-permissions",
       "expo-asset",
-      "expo-audio"
+      "expo-audio",
+      ["@sentry/react-native", {
+        "organization": "finni-vb",
+        "project": "react-native"
+      }]
     ]
   }
 }
