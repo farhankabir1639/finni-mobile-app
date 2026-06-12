@@ -21,7 +21,7 @@
     "newArchEnabled": true,
     "android": {
       "package": "com.finni.app",
-      "versionCode": 26,
+      "versionCode": 27,
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
