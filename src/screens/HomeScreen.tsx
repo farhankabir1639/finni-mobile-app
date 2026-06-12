@@ -16,6 +16,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useProfile } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
 import { chatAgent, transcribeAudio } from '../lib/agents';
+import type { ParsedTransaction } from '../lib/agents';
 import { seedDefaultCategories } from '../lib/seedCategories';
 import { captureError } from '../lib/sentry';
 import { trackEvent, trackScreen } from '../lib/analytics';
@@ -27,10 +28,11 @@ import Aurora from '../components/Aurora';
 import Orb from '../components/Orb';
 import ArcMeter from '../components/ArcMeter';
 import GlassCard from '../components/GlassCard';
+import TransactionCard from '../components/TransactionCard';
 import { t, fonts } from '../theme/tokens';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type Message = { id: string; role: 'user' | 'assistant'; content: string; timestamp?: string };
+type Message = { id: string; role: 'user' | 'assistant'; content: string; timestamp?: string; transaction?: ParsedTransaction };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getGreetingBase(): string {
@@ -435,7 +437,7 @@ export default function HomeScreen() {
     try {
       const { response, transaction } = await chatAgent(trimmed, user.id, [...messages, userMsg], chatContext, sessionDate);
       setIsTyping(false);
-      const aiMsg: Message = { id: (Date.now() + 1).toString(), role: 'assistant', content: response, timestamp: new Date().toISOString() };
+      const aiMsg: Message = { id: (Date.now() + 1).toString(), role: 'assistant', content: response, timestamp: new Date().toISOString(), transaction: transaction ?? undefined };
       const updated = [...messages, userMsg, aiMsg];
       setMessages(updated);
       saveSession(user.id, updated as SessionMessage[], sessionDate);
@@ -663,9 +665,20 @@ export default function HomeScreen() {
                     <Orb size={28} rings={false} />
                   </View>
                   <View style={styles.asMsgCol}>
-                    <GlassCard style={styles.asBubble} borderRadius={t.rMd} intensity={22}>
-                      <Text style={[styles.bubbleText, { fontFamily: fonts.regular }]}>{msg.content}</Text>
-                    </GlassCard>
+                    {msg.transaction ? (
+                      <TransactionCard
+                        userId={user!.id}
+                        amount={msg.transaction.amount}
+                        category={msg.transaction.category}
+                        type={msg.transaction.type}
+                        categories={chatContext.categories ?? []}
+                        currency={chatContext.profile?.currency ?? 'USD'}
+                      />
+                    ) : (
+                      <GlassCard style={styles.asBubble} borderRadius={t.rMd} intensity={22}>
+                        <Text style={[styles.bubbleText, { fontFamily: fonts.regular }]}>{msg.content}</Text>
+                      </GlassCard>
+                    )}
                     {msg.id !== 'welcome' && (
                       <AIActionRow
                         msg={msg}
