@@ -78,6 +78,7 @@ export default function TransactionsScreen() {
   const { width, height } = useWindowDimensions();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [allCategories, setAllCategories] = useState<PickerCategory[]>([]);
+  const [configuredIncome, setConfiguredIncome] = useState(0);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterOption>('all');
@@ -90,7 +91,7 @@ export default function TransactionsScreen() {
   const fetchTransactions = useCallback(async () => {
     if (!user?.id) { setLoading(false); setTransactions([]); return; }
     setLoading(true);
-    const [txResult, catsResult] = await Promise.all([
+    const [txResult, catsResult, incomeResult] = await Promise.all([
       supabase
         .from('transactions')
         .select('*, categories(id, name, emoji)')
@@ -100,10 +101,21 @@ export default function TransactionsScreen() {
         .from('categories')
         .select('id, name, emoji')
         .eq('user_id', user.id),
+      supabase
+        .from('income')
+        .select('amount, frequency')
+        .eq('user_id', user.id),
     ]);
     setLoading(false);
     setTransactions((txResult.data as Transaction[]) ?? []);
     setAllCategories((catsResult.data as PickerCategory[]) ?? []);
+    const monthly = ((incomeResult.data ?? []) as { amount: number; frequency: string }[]).reduce((sum, r) => {
+      const a = Number(r.amount) || 0;
+      if (r.frequency === 'weekly') return sum + a * (52 / 12);
+      if (r.frequency === 'annual') return sum + a / 12;
+      return sum + a;
+    }, 0);
+    setConfiguredIncome(monthly);
   }, [user?.id]);
 
   const handleDeleteTransaction = useCallback((id: string) => {
@@ -176,15 +188,15 @@ export default function TransactionsScreen() {
   }, [transactions, searchQuery, filter, customRange]);
 
   const summary = useMemo(() => {
-    let spent = 0; let income = 0;
+    let spent = 0; let txIncome = 0;
     for (const g of filteredAndGrouped) {
       for (const tx of g.items) {
         if (tx.type === 'expense') spent += Number(tx.withdrawal) || 0;
-        else income += Number(tx.deposit) || 0;
+        else txIncome += Number(tx.deposit) || 0;
       }
     }
-    return { spent, income };
-  }, [filteredAndGrouped]);
+    return { spent, income: configuredIncome + txIncome };
+  }, [filteredAndGrouped, configuredIncome]);
 
   const customChipLabel = customRange
     ? `${fmtShort(customRange.start)} – ${fmtShort(customRange.end)}`

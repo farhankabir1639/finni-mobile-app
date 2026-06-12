@@ -18,6 +18,8 @@ import { useProfile, CURRENCIES } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
 import { t, fonts } from '../theme/tokens';
 import { seedDefaultCategories } from '../lib/seedCategories';
+import DatePicker from '../components/DatePicker';
+import { fmtShort } from '../components/DateRangePicker';
 import Aurora from '../components/Aurora';
 import Orb from '../components/Orb';
 import GlassCard from '../components/GlassCard';
@@ -91,6 +93,7 @@ export default function OnboardingScreen() {
   const [goalName, setGoalName] = useState('');
   const [targetAmount, setTargetAmount] = useState('');
   const [deadline, setDeadline] = useState('');
+  const [showDeadlinePicker, setShowDeadlinePicker] = useState(false);
 
   // Completion screen fallback
   const [showFallback, setShowFallback] = useState(false);
@@ -362,8 +365,12 @@ export default function OnboardingScreen() {
                         </View>
                       </View>
                       <View style={s.fieldGroup}>
-                        <Text style={s.fieldLabel}>Deadline <Text style={s.optional}>(optional, YYYY-MM-DD)</Text></Text>
-                        <TextInput style={s.input} placeholder="e.g. 2026-12-31" placeholderTextColor={t.text3} value={deadline} onChangeText={setDeadline} />
+                        <Text style={s.fieldLabel}>Deadline <Text style={s.optional}>(optional)</Text></Text>
+                        <TouchableOpacity style={s.input} onPress={() => setShowDeadlinePicker(true)} activeOpacity={0.75}>
+                          <Text style={[s.datePickerText, { color: deadline ? t.text : t.text3 }]}>
+                            {deadline ? fmtShort(deadline) : 'Select a deadline'}
+                          </Text>
+                        </TouchableOpacity>
                       </View>
                     </View>
                   )}
@@ -399,6 +406,15 @@ export default function OnboardingScreen() {
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
+
+      <DatePicker
+        visible={showDeadlinePicker}
+        value={deadline || null}
+        minDate={new Date().toISOString().slice(0, 10)}
+        title="Set deadline"
+        onApply={(date) => setDeadline(date)}
+        onClose={() => setShowDeadlinePicker(false)}
+      />
     </View>
   );
 }
@@ -437,6 +453,7 @@ const s = StyleSheet.create({
     backgroundColor: t.glass2, borderWidth: 1, borderColor: t.glassLine, borderRadius: t.rMd,
     paddingHorizontal: 18, paddingVertical: 16, fontSize: 16, fontFamily: fonts.medium, color: t.text,
   },
+  datePickerText: { fontSize: 16, fontFamily: fonts.medium },
   inputWithPrefix: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: t.glass2, borderWidth: 1, borderColor: t.glassLine, borderRadius: t.rMd,
   },

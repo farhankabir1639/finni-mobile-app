@@ -4,7 +4,7 @@ import { t, fonts } from '../theme/tokens';
 
 export type DateRange = { start: string; end: string };
 
-const MONTHS = [
+export const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
