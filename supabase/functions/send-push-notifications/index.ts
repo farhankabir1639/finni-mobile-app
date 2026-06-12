@@ -58,7 +58,8 @@ Deno.serve(async (req) => {
   }
 
   const authHeader = req.headers.get('Authorization') ?? '';
-  if (!authHeader.includes(SUPABASE_SERVICE_KEY.slice(0, 10))) {
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (token !== SUPABASE_SERVICE_KEY) {
     return new Response('Unauthorized', { status: 401 });
   }
 

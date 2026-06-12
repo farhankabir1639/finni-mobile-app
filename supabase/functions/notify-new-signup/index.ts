@@ -16,7 +16,8 @@ Deno.serve(async (req) => {
 
   // Supabase webhooks send the Authorization header with the service role key
   const auth = req.headers.get('Authorization') ?? '';
-  if (!auth.includes(SUPABASE_SERVICE_KEY.slice(0, 10))) {
+  const token = auth.replace(/^Bearer\s+/i, '').trim();
+  if (token !== SUPABASE_SERVICE_KEY) {
     return new Response('Unauthorized', { status: 401 });
   }
 
