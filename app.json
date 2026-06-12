@@ -58,6 +58,14 @@
       "expo-asset",
       "expo-audio",
       [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#0A0F1E",
+          "sounds": []
+        }
+      ],
+      [
         "@sentry/react-native",
         {
           "organization": "finni-vb",

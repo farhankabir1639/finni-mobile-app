@@ -21,6 +21,7 @@ import EditProfileModal from './settings/EditProfileModal';
 import CurrencyModal from './settings/CurrencyModal';
 import IncomeModal from './settings/IncomeModal';
 import GoalsModal from './settings/GoalsModal';
+import NotificationsModal from './settings/NotificationsModal';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -70,6 +71,7 @@ export default function SettingsScreen() {
   const [currencyModalVisible, setCurrencyModalVisible] = useState(false);
   const [incomeModalVisible, setIncomeModalVisible] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [notificationsVisible, setNotificationsVisible] = useState(false);
 
   const handleSignOut = () => {
     Alert.alert(
@@ -201,6 +203,17 @@ export default function SettingsScreen() {
           <SettingsRow label="Goals" icon="🎯" color={t.cyan} onPress={() => setGoalsModalVisible(true)} />
         </View>
 
+        {/* Notifications */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Notifications</Text>
+          <SettingsRow
+            label="Email & Push Notifications"
+            icon="🔔"
+            color={t.auraAqua}
+            onPress={() => setNotificationsVisible(true)}
+          />
+        </View>
+
         {/* Legal & Support */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Legal & Support</Text>
@@ -273,6 +286,14 @@ export default function SettingsScreen() {
 
       <Modal visible={incomeModalVisible} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setIncomeModalVisible(false)}>
         <IncomeModal userId={user?.id ?? ''} onClose={() => setIncomeModalVisible(false)} />
+      </Modal>
+
+      <Modal visible={notificationsVisible} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setNotificationsVisible(false)}>
+        <NotificationsModal
+          userId={user?.id ?? ''}
+          userEmail={user?.email ?? ''}
+          onClose={() => setNotificationsVisible(false)}
+        />
       </Modal>
     </View>
   );
