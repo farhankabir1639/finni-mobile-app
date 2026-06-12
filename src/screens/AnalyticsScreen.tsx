@@ -1167,6 +1167,7 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   insightTitle: {
+    flex: 1,
     fontSize: 15.5,
     fontFamily: fonts.semiBold,
     fontWeight: '600',

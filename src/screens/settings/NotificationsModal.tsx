@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, Switch, ActivityIndicator, Alert,
+  StyleSheet, ViewStyle,
 } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { t, fonts } from '../../theme/tokens';
@@ -46,12 +47,15 @@ export default function NotificationsModal({ userId, userEmail, onClose }: Props
   const save = useCallback(
     async (field: 'email_insights' | 'push_enabled', value: string | boolean) => {
       setSaving(true);
-      const { error } = await supabase
-        .from('profiles')
-        .update({ [field]: value })
-        .eq('id', userId);
-      setSaving(false);
-      if (error) Alert.alert('Error', 'Could not save preference. Please try again.');
+      try {
+        const { error } = await supabase
+          .from('profiles')
+          .update({ [field]: value })
+          .eq('id', userId);
+        if (error) Alert.alert('Error', 'Could not save preference. Please try again.');
+      } finally {
+        setSaving(false);
+      }
     },
     [userId]
   );
@@ -168,8 +172,6 @@ export default function NotificationsModal({ userId, userEmail, onClose }: Props
     </View>
   );
 }
-
-import { StyleSheet, ViewStyle } from 'react-native';
 
 const n = StyleSheet.create({
   sectionHead: {

@@ -16,8 +16,9 @@ function getWeekStartISO(): string {
   const diff = day === 0 ? -6 : 1 - day; // Monday
   const monday = new Date(d);
   monday.setDate(d.getDate() + diff);
-  monday.setHours(0, 0, 0, 0);
-  return monday.toISOString().split('T')[0];
+  // Use local date parts to avoid UTC conversion shifting the day
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${monday.getFullYear()}-${pad(monday.getMonth() + 1)}-${pad(monday.getDate())}`;
 }
 
 function buildTagline(
@@ -76,7 +77,8 @@ export default function TransactionCard({
         const total = (data ?? []).reduce((sum, r) =>
           sum + (type === 'expense' ? (Number(r.withdrawal) || 0) : (Number(r.deposit) || 0)), 0);
         setWeeklyTotal(total);
-      });
+      })
+      .catch(() => setWeeklyTotal(0));
   }, [userId, matched?.id, type]);
 
   const tagline = weeklyTotal !== null
