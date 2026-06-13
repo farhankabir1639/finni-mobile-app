@@ -599,6 +599,9 @@ export type ChatMessage = { id: string; role: 'user' | 'assistant'; content: str
 export type ChatAgentResult = {
   response: string;
   transaction: ParsedTransaction;
+  // All transactions parsed from a single message (bulk logging). The chat
+  // renders one card per entry. `transaction` stays as the first for back-compat.
+  transactions?: ParsedTransaction[];
 };
 
 export type ChatAgentContext = {
@@ -1250,20 +1253,35 @@ Current user message: ${userMessage}`;
         };
       }
 
+      // Collect every parsed transaction so the chat can render a card per item.
+      // The primary transaction is first; extras follow below.
+      const parsedTransactions: ParsedTransaction[] = [{
+        amount,
+        description,
+        category: categoryName ?? '',
+        date: new Date().toISOString().slice(0, 10),
+        type: type as 'expense' | 'income',
+      }];
+
       // Insert any additional transactions from the same message (bulk logging)
       for (const extra of txDataArray.slice(1)) {
         const extraAmount = Math.abs(typeof extra.amount === 'number' ? extra.amount : parseFloat(String(extra.amount ?? '')));
         const extraType = extra.type === 'income' ? 'income' : 'expense';
         if (!isNaN(extraAmount) && extraAmount > 0 && extraAmount < 1_000_000) {
-          let extraCatId: string | null = typeof extra.category_id === 'string' ? extra.category_id : null;
+          const extraRawName = typeof extra.category_id === 'string' ? extra.category_id : '';
+          let extraCatId: string | null = extraRawName || null;
+          let extraCatName = extraRawName;
           if (extraCatId) {
             const uuidRx = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-            if (!uuidRx.test(extraCatId)) {
+            if (uuidRx.test(extraCatId)) {
+              extraCatName = (allCategories ?? []).find(c => c.id === extraCatId)?.name ?? extraCatName;
+            } else {
               const lower = extraCatId.toLowerCase();
               const best = (allCategories ?? [])
                 .map(c => ({ ...c, score: c.name.toLowerCase() === lower ? 1 : c.name.toLowerCase().includes(lower) || lower.includes(c.name.toLowerCase()) ? 0.85 : 0 }))
                 .sort((a, b) => b.score - a.score)[0];
-              extraCatId = (best?.score ?? 0) >= 0.7 ? best.id : null;
+              if ((best?.score ?? 0) >= 0.7) { extraCatId = best.id; extraCatName = best.name; }
+              else { extraCatId = null; }
             }
           }
           const extraInsert: Record<string, unknown> = {
@@ -1280,6 +1298,13 @@ Current user message: ${userMessage}`;
           if (extraCatId) extraInsert.category_id = extraCatId;
           const { error: extraErr } = await supabase.from('transactions').insert(extraInsert);
           if (extraErr && __DEV__) console.error('[Agent1] Extra transaction insert error:', extraErr);
+          parsedTransactions.push({
+            amount: extraAmount,
+            description: typeof extra.description === 'string' ? extra.description : '',
+            category: extraCatName,
+            date: (sessionDate ?? new Date().toISOString()).slice(0, 10),
+            type: extraType as 'expense' | 'income',
+          });
         }
       }
 
@@ -1313,13 +1338,8 @@ Current user message: ${userMessage}`;
 
       return {
         response: finalResponse,
-        transaction: {
-          amount,
-          description,
-          category: categoryName ?? '',
-          date: new Date().toISOString().slice(0, 10),
-          type: type as 'expense' | 'income',
-        },
+        transaction: parsedTransactions[0],
+        transactions: parsedTransactions,
       };
     }
 

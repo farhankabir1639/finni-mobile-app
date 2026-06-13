@@ -32,7 +32,7 @@ import TransactionCard from '../components/TransactionCard';
 import { t, fonts } from '../theme/tokens';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type Message = { id: string; role: 'user' | 'assistant'; content: string; timestamp?: string; transaction?: ParsedTransaction };
+type Message = { id: string; role: 'user' | 'assistant'; content: string; timestamp?: string; transaction?: ParsedTransaction; transactions?: ParsedTransaction[] };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getGreetingBase(): string {
@@ -437,9 +437,10 @@ export default function HomeScreen() {
     setIsTyping(true);
     const sessionDate = activeSessionDate ?? undefined;
     try {
-      const { response, transaction } = await chatAgent(trimmed, user.id, [...messages, userMsg], chatContext, sessionDate);
+      const { response, transaction, transactions } = await chatAgent(trimmed, user.id, [...messages, userMsg], chatContext, sessionDate);
       setIsTyping(false);
-      const aiMsg: Message = { id: (Date.now() + 1).toString(), role: 'assistant', content: response, timestamp: new Date().toISOString(), transaction: transaction ?? undefined };
+      const txList = (transactions ?? (transaction ? [transaction] : [])).filter(Boolean) as ParsedTransaction[];
+      const aiMsg: Message = { id: (Date.now() + 1).toString(), role: 'assistant', content: response, timestamp: new Date().toISOString(), transaction: transaction ?? undefined, transactions: txList.length ? txList : undefined };
       const updated = [...messages, userMsg, aiMsg];
       setMessages(updated);
       saveSession(user.id, updated as SessionMessage[], sessionDate);
@@ -667,20 +668,30 @@ export default function HomeScreen() {
                     <Orb size={28} rings={false} />
                   </View>
                   <View style={styles.asMsgCol}>
-                    {msg.transaction ? (
-                      <TransactionCard
-                        userId={user!.id}
-                        amount={msg.transaction.amount}
-                        category={msg.transaction.category}
-                        type={msg.transaction.type}
-                        categories={chatContext.categories ?? []}
-                        currency={chatContext.profile?.currency ?? 'USD'}
-                      />
-                    ) : (
-                      <GlassCard style={styles.asBubble} borderRadius={t.rMd} intensity={22}>
-                        <Text style={[styles.bubbleText, { fontFamily: fonts.regular }]}>{msg.content}</Text>
-                      </GlassCard>
-                    )}
+                    {(() => {
+                      // New messages carry `transactions[]`; older persisted ones
+                      // carry a single `transaction`. Render one card per item.
+                      const cards = (msg.transactions ?? (msg.transaction ? [msg.transaction] : []))
+                        .filter(Boolean) as NonNullable<ParsedTransaction>[];
+                      return cards.length ? (
+                        cards.map((tx, i) => (
+                          <View key={`${msg.id}-tx-${i}`} style={i > 0 ? styles.txCardSpacing : undefined}>
+                            <TransactionCard
+                              userId={user!.id}
+                              amount={tx.amount}
+                              category={tx.category}
+                              type={tx.type}
+                              categories={chatContext.categories ?? []}
+                              currency={chatContext.profile?.currency ?? 'USD'}
+                            />
+                          </View>
+                        ))
+                      ) : (
+                        <GlassCard style={styles.asBubble} borderRadius={t.rMd} intensity={22}>
+                          <Text style={[styles.bubbleText, { fontFamily: fonts.regular }]}>{msg.content}</Text>
+                        </GlassCard>
+                      );
+                    })()}
                     {msg.id !== 'welcome' && (
                       <AIActionRow
                         msg={msg}
@@ -838,6 +849,7 @@ const styles = StyleSheet.create({
   orbAvatar: { width: 28, height: 28, marginRight: 10, marginTop: 2 },
   asMsgCol: { flex: 1 },
   asBubble: { padding: 13 },
+  txCardSpacing: { marginTop: 8 },
   typingBubble: { padding: 13, minWidth: 56 },
   typingText: { fontSize: 16, color: t.auraAqua },
 

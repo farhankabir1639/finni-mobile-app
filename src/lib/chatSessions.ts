@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { ParsedTransaction } from './agents';
-export type SessionMessage = { id: string; role: 'user' | 'assistant'; content: string; timestamp?: string; transaction?: ParsedTransaction };
+export type SessionMessage = { id: string; role: 'user' | 'assistant'; content: string; timestamp?: string; transaction?: ParsedTransaction; transactions?: ParsedTransaction[] };
 export type ChatSession = { id: string; date: string; messages: SessionMessage[]; preview: string };
 
 const MAX_SESSIONS = 20;
