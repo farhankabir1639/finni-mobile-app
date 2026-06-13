@@ -52,14 +52,48 @@ function sanitizeContext(context: Record<string, unknown>): Record<string, unkno
   return sanitized;
 }
 
-export function captureError(error: unknown, context?: Record<string, unknown>) {
+// Sentry can only title a real Error. Supabase/Postgrest errors are plain
+// objects ({ message, details, hint, code }), so passing them straight to
+// captureException yields the useless "Object captured as exception with keys:
+// message". Wrap them into a real Error that carries the actual message + code.
+function toError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  if (typeof error === 'string') return new Error(error);
+  if (error && typeof error === 'object') {
+    const o = error as Record<string, unknown>;
+    const message = typeof o.message === 'string' && o.message ? o.message : JSON.stringify(o);
+    const err = new Error(message) as Error & { code?: string; details?: string; hint?: string };
+    const code = typeof o.code === 'string' ? o.code : undefined;
+    if (code) { err.code = code; err.name = `SupabaseError(${code})`; }
+    else { err.name = 'NonError'; }
+    if (typeof o.details === 'string') err.details = o.details;
+    if (typeof o.hint === 'string') err.hint = o.hint;
+    return err;
+  }
+  return new Error(String(error));
+}
+
+export function captureError(
+  error: unknown,
+  context?: Record<string, unknown>,
+  level: Sentry.SeverityLevel = 'error',
+) {
   if (__DEV__) return;
-  if (context) Sentry.setContext('extra', sanitizeContext(context));
-  Sentry.captureException(error);
+  const err = toError(error);
+  // withScope keeps level + context scoped to THIS event (setContext is global
+  // and would otherwise leak the previous error's context onto later events).
+  Sentry.withScope((scope) => {
+    scope.setLevel(level);
+    if (context) scope.setContext('extra', sanitizeContext(context));
+    Sentry.captureException(err);
+  });
 }
 
 export function captureMessage(message: string, level: Sentry.SeverityLevel = 'warning', context?: Record<string, unknown>) {
   if (__DEV__) return;
-  if (context) Sentry.setContext('extra', sanitizeContext(context));
-  Sentry.captureMessage(message, level);
+  Sentry.withScope((scope) => {
+    scope.setLevel(level);
+    if (context) scope.setContext('extra', sanitizeContext(context));
+    Sentry.captureMessage(message);
+  });
 }

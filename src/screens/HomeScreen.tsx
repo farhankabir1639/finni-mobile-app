@@ -342,10 +342,12 @@ export default function HomeScreen() {
         supabase.from('transactions').select('withdrawal, deposit, description, category_id, date, type').eq('user_id', user.id).order('date', { ascending: false }).limit(10),
         supabase.from('financial_goals').select('name, target_amount, current_amount').eq('user_id', user.id),
       ]);
-      if (pr.error) captureError(pr.error, { context: 'fetchCtx.profile' });
-      if (cr.error) captureError(cr.error, { context: 'fetchCtx.categories' });
-      if (tr.error) captureError(tr.error, { context: 'fetchCtx.transactions' });
-      if (gr.error) captureError(gr.error, { context: 'fetchCtx.goals' });
+      // Each query is independent and the UI degrades gracefully (empty section),
+      // so a single transient failure is a warning, not an error-level event.
+      if (pr.error) captureError(pr.error, { context: 'fetchCtx.profile' }, 'warning');
+      if (cr.error) captureError(cr.error, { context: 'fetchCtx.categories' }, 'warning');
+      if (tr.error) captureError(tr.error, { context: 'fetchCtx.transactions' }, 'warning');
+      if (gr.error) captureError(gr.error, { context: 'fetchCtx.goals' }, 'warning');
       setChatContext({
         profile: pr.data ? { name: pr.data.name, currency: pr.data.currency } : null,
         categories: (cr.data as { id: string; name: string; emoji?: string; budget?: number; spent?: number }[]) ?? [],
