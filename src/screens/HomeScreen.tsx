@@ -136,8 +136,8 @@ const aiStyles = StyleSheet.create({
 });
 
 // ── Main Screen ───────────────────────────────────────────────────────────────
-// GlassDock content height: paddingVertical(10*2) + tabPadding(4*2) + icon(22) + gap(4) + label(12) ≈ 70px
-const DOCK_CONTENT_H = 86;
+// GlassDock: inner paddingVertical(10*2=20) + active tab (54px pill + 4*2 padding = 62px) = 82px
+const DOCK_CONTENT_H = 82;
 
 export default function HomeScreen() {
   const navigation = useNavigation();

@@ -37,15 +37,29 @@ export default function GlowDonut({
   const circumference = 2 * Math.PI * radius;
 
   let accumulated = 0;
-  const arcs = data
-    .filter((slice) => slice.pct > 0)
-    .map((slice) => {
-      const len = Math.max(0, (slice.pct / 100) * circumference - SEG_GAP);
-      const offset = circumference - len;
-      const rotation = -90 + (accumulated / 100) * 360;
-      accumulated += slice.pct;
-      return { ...slice, len, offset, rotation };
+  const filtered = data.filter((slice) => slice.pct > 0);
+  const arcs = filtered.map((slice) => {
+    const len = Math.max(0, (slice.pct / 100) * circumference - SEG_GAP);
+    const rotation = -90 + (accumulated / 100) * 360;
+    accumulated += slice.pct;
+    return { ...slice, len, offset: 0, rotation };
+  });
+
+  // If data doesn't cover the full ring (rounding or remaining budget), add a
+  // dim trailing arc so the ring is always visually complete and the gap is
+  // clearly communicated as "remaining" rather than a rendering artifact.
+  if (accumulated < 99) {
+    const remPct = 100 - accumulated;
+    const len = Math.max(0, (remPct / 100) * circumference - SEG_GAP);
+    arcs.push({
+      name: 'Remaining',
+      pct: remPct,
+      color: 'rgba(255,255,255,0.07)',
+      len,
+      offset: 0,
+      rotation: -90 + (accumulated / 100) * 360,
     });
+  }
 
   // Center hole insets within the canvas
   const holeInset = GLOW_PAD + strokeWidth + 4;
