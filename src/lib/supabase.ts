@@ -10,7 +10,15 @@ const clean = (v: string | undefined): string | undefined => {
   return trimmed ? trimmed : undefined;
 };
 
-export const supabaseUrl = clean(process.env.EXPO_PUBLIC_SUPABASE_URL);
+// The URL must actually be an http(s) URL. This also guards against a build
+// misconfiguration where an un-interpolated "$EXPO_PUBLIC_SUPABASE_URL" literal
+// leaks through — non-empty but not a valid URL, which would still SIGABRT.
+const cleanUrl = (v: string | undefined): string | undefined => {
+  const c = clean(v);
+  return c && /^https?:\/\//i.test(c) ? c : undefined;
+};
+
+export const supabaseUrl = cleanUrl(process.env.EXPO_PUBLIC_SUPABASE_URL);
 const supabaseAnonKey = clean(process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
 
 if (!supabaseUrl || !supabaseAnonKey) {
