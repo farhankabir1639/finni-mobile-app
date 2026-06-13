@@ -537,6 +537,10 @@ export default function HomeScreen() {
   const isConversationEmpty = messages.length <= 1;
   const busy = isTyping;
 
+  // Guard: user becomes null the moment signOut() fires. The navigator will
+  // switch to the auth stack on the next tick, but React renders synchronously
+  // first — returning null prevents any user!.id access from crashing.
+  if (!user) return null;
 
   // ── Composer pieces ────────────────────────────────────────────────────────
   const composerInner = (

@@ -35,7 +35,7 @@ export default function AppNavigator() {
   useEffect(() => {
     if (!user?.id) return;
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') updateLastActive(user.id!);
+      if (state === 'active' && user?.id) updateLastActive(user.id);
     });
     return () => sub.remove();
   }, [user?.id]);
