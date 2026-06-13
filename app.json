@@ -35,7 +35,8 @@
         "android.permission.WRITE_EXTERNAL_STORAGE"
       ],
       "adaptiveIcon": {
-        "backgroundColor": "#6366F1",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "backgroundColor": "#7C5CFC",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
@@ -59,7 +60,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/icon.png",
+          "icon": "./assets/notification-icon.png",
           "color": "#0A0F1E",
           "sounds": []
         }
