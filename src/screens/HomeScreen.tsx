@@ -3,7 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity,
   Pressable, KeyboardAvoidingView, Platform, Modal, Alert,
-  Linking, Animated, useWindowDimensions, Keyboard,
+  Linking, Animated, useWindowDimensions, Keyboard, AppState,
 } from 'react-native';
 // expo-audio is loaded lazily inside recording functions so a native-module
 // failure on certain devices doesn't crash the entire app on startup.
@@ -16,7 +16,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useProfile } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
 import { chatAgent, transcribeAudio } from '../lib/agents';
-import type { ParsedTransaction } from '../lib/agents';
+import type { ParsedTransaction, CategoryProposal } from '../lib/agents';
+import { addPendingProposals, resolvePendingProposals } from '../lib/categoryProposals';
 import { seedDefaultCategories } from '../lib/seedCategories';
 import { captureError } from '../lib/sentry';
 import { trackEvent, trackScreen } from '../lib/analytics';
@@ -29,10 +30,11 @@ import Orb from '../components/Orb';
 import ArcMeter from '../components/ArcMeter';
 import GlassCard from '../components/GlassCard';
 import TransactionCard from '../components/TransactionCard';
+import CategoryProposalCard from '../components/CategoryProposalCard';
 import { t, fonts } from '../theme/tokens';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type Message = { id: string; role: 'user' | 'assistant'; content: string; timestamp?: string; transaction?: ParsedTransaction; transactions?: ParsedTransaction[] };
+type Message = { id: string; role: 'user' | 'assistant'; content: string; timestamp?: string; transaction?: ParsedTransaction; transactions?: ParsedTransaction[]; categoryProposals?: CategoryProposal[] };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getGreetingBase(): string {
@@ -360,7 +362,28 @@ export default function HomeScreen() {
     } finally { isFetchingCtxRef.current = false; }
   }, [user?.id]);
 
-  useFocusEffect(React.useCallback(() => { fetchChatContext(); }, [fetchChatContext]));
+  useFocusEffect(React.useCallback(() => {
+    fetchChatContext();
+    // Leaving the chat tab = session end: auto-create any category proposals the
+    // user never responded to, then their transactions get re-tagged.
+    return () => { if (user?.id) resolvePendingProposals(user.id); };
+  }, [fetchChatContext, user?.id]));
+
+  // Backgrounding the app also ends the session → resolve pending proposals.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if ((state === 'background' || state === 'inactive') && user?.id) {
+        resolvePendingProposals(user.id);
+      }
+    });
+    return () => sub.remove();
+  }, [user?.id]);
+
+  // On launch, auto-create any proposals left pending from a prior session that
+  // ended without the handlers firing (e.g. the app was force-killed).
+  useEffect(() => {
+    if (user?.id) resolvePendingProposals(user.id).then((n) => { if (n) fetchChatContext(); });
+  }, [user?.id]);
 
   const fetchStats = useCallback(async () => {
     if (!user?.id) return;
@@ -437,10 +460,13 @@ export default function HomeScreen() {
     setIsTyping(true);
     const sessionDate = activeSessionDate ?? undefined;
     try {
-      const { response, transaction, transactions } = await chatAgent(trimmed, user.id, [...messages, userMsg], chatContext, sessionDate);
+      const { response, transaction, transactions, categoryProposals } = await chatAgent(trimmed, user.id, [...messages, userMsg], chatContext, sessionDate);
       setIsTyping(false);
       const txList = (transactions ?? (transaction ? [transaction] : [])).filter(Boolean) as ParsedTransaction[];
-      const aiMsg: Message = { id: (Date.now() + 1).toString(), role: 'assistant', content: response, timestamp: new Date().toISOString(), transaction: transaction ?? undefined, transactions: txList.length ? txList : undefined };
+      // Persist any new-category proposals so they auto-create at session end if
+      // the user doesn't respond to the prompt.
+      if (categoryProposals?.length) addPendingProposals(user.id, categoryProposals);
+      const aiMsg: Message = { id: (Date.now() + 1).toString(), role: 'assistant', content: response, timestamp: new Date().toISOString(), transaction: transaction ?? undefined, transactions: txList.length ? txList : undefined, categoryProposals: categoryProposals?.length ? categoryProposals : undefined };
       const updated = [...messages, userMsg, aiMsg];
       setMessages(updated);
       saveSession(user.id, updated as SessionMessage[], sessionDate);
@@ -692,6 +718,15 @@ export default function HomeScreen() {
                         </GlassCard>
                       );
                     })()}
+                    {msg.categoryProposals?.length ? (
+                      <View style={styles.txCardSpacing}>
+                        <CategoryProposalCard
+                          userId={user!.id}
+                          proposals={msg.categoryProposals}
+                          onResolved={fetchChatContext}
+                        />
+                      </View>
+                    ) : null}
                     {msg.id !== 'welcome' && (
                       <AIActionRow
                         msg={msg}

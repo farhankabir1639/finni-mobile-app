@@ -43,7 +43,15 @@ export async function saveSession(userId: string, messages: SessionMessage[], da
     const targetDate = date ?? todayDateStr();
     const sessionId = `${userId}_${targetDate}`;
     const preview = messages.find((m) => m.role === 'user')?.content?.slice(0, 60) ?? 'No messages';
-    const updated: ChatSession = { id: sessionId, date: targetDate, messages, preview };
+    // Category proposals are a transient, live-only interaction; once a session
+    // ends they're auto-created and cleared, so don't persist them (a reloaded
+    // session shouldn't re-show an already-resolved "create category?" prompt).
+    const persisted = messages.map((m) => {
+      if (!('categoryProposals' in (m as Record<string, unknown>))) return m;
+      const { categoryProposals: _drop, ...rest } = m as SessionMessage & { categoryProposals?: unknown };
+      return rest;
+    });
+    const updated: ChatSession = { id: sessionId, date: targetDate, messages: persisted, preview };
     const idx = sessions.findIndex((s) => s.date === targetDate);
     if (idx >= 0) sessions[idx] = updated;
     else {

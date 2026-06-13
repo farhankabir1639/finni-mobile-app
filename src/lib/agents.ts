@@ -596,12 +596,24 @@ Use ${currency} for all amounts. Be specific to the user's actual spending patte
 // --- Chat agent: conversational + transaction parsing ---
 export type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string };
 
+// A category the AI inferred that doesn't exist yet. Instead of silently
+// creating it, we save the affected transaction(s) under "Other" and propose
+// the new category to the user — created on confirm, or auto-created at session
+// end if they don't respond.
+export type CategoryProposal = {
+  name: string;
+  emoji: string;
+  transactionIds: string[];
+};
+
 export type ChatAgentResult = {
   response: string;
   transaction: ParsedTransaction;
   // All transactions parsed from a single message (bulk logging). The chat
   // renders one card per entry. `transaction` stays as the first for back-compat.
   transactions?: ParsedTransaction[];
+  // New categories the user should confirm (see CategoryProposal).
+  categoryProposals?: CategoryProposal[];
 };
 
 export type ChatAgentContext = {
@@ -984,6 +996,7 @@ CRITICAL RULES — YOU MUST FOLLOW THESE EXACTLY:
    INVESTMENT_DATA:{"name": "Grameenphone", "ticker": "GP", "asset_type": "stock", "quantity": 10, "buy_price": 450, "action": "buy"}
 7. NEVER respond with only the confirmation text and no data tag — the app cannot save without it.
 8. NEVER emit both TRANSACTION_DATA and INVESTMENT_DATA in the same response. Pick one based on what the user said.
+9. BULK LOGGING: When the user lists MULTIPLE transactions in one message, log them ALL immediately — emit one TRANSACTION_DATA line per transaction. Do NOT ask category questions in text for this case (STEP 3/4 text prompts are for single ambiguous transactions only). For any transaction that doesn't strongly match an existing category, set category_id to a short, sensible NEW category name (e.g. "Gym", "Pets", "Gifts", "Rent") rather than "Other" — the app will ask the user to confirm creating those new categories. Reserve "Other" only for transactions that genuinely fit no specific category name.
 
 Current user message: ${userMessage}`;
 
@@ -1136,6 +1149,9 @@ Current user message: ${userMessage}`;
     if (txData && !isNaN(parsedTxAmount) && parsedTxAmount > 0 && parsedTxAmount < 1_000_000 && (txData.type === 'expense' || txData.type === 'income')) {
       let categoryId = typeof txData.category_id === 'string' ? txData.category_id : null;
       let matchingScore = 0;
+      // If the AI proposes a category that doesn't exist, we hold it here instead
+      // of creating it, and attach the transaction id after insert.
+      let proposalForMain: { name: string; emoji: string } | null = null;
 
       const { data: allCategories } = await supabase
         .from('categories')
@@ -1175,12 +1191,13 @@ Current user message: ${userMessage}`;
             categoryId = bestMatch.id;
             matchingScore = bestMatch.score;
           } else {
-            // Score below threshold — auto-create a new category with a smart emoji
+            // No good match. Don't silently create — save under "Other" for now
+            // and propose the new category for the user to confirm (created on
+            // confirm, or auto-created at session end).
             const newCatName = typeof txData.category_id === 'string' ? txData.category_id : categoryId;
             const autoEmoji = CATEGORY_EMOJI_MAP[newCatName.toLowerCase()] ?? '📦';
-            if (__DEV__) console.log(`[Agent1] No match above threshold (best: ${bestMatch?.score?.toFixed(2) ?? 'n/a'}), creating category: "${newCatName}" ${autoEmoji}`);
 
-            // Pre-check prevents duplicate categories from concurrent requests
+            // If it already exists (e.g. created earlier this session), reuse it.
             const { data: existingByName } = await supabase
               .from('categories')
               .select('id')
@@ -1193,30 +1210,11 @@ Current user message: ${userMessage}`;
               matchingScore = 0.85;
               allCategories?.push({ id: existingByName.id, name: newCatName });
             } else {
-              const { data: newCat, error: newCatError } = await supabase
-                .from('categories')
-                .insert({
-                  user_id: userId,
-                  name: newCatName,
-                  emoji: autoEmoji,
-                  budget: 0,
-                  spent: 0,
-                  color: '#6366F1',
-                  type: 'monthly',
-                })
-                .select()
-                .single();
-              if (newCat && !newCatError) {
-                categoryId = newCat.id;
-                matchingScore = bestMatch?.score ?? 0;
-                allCategories?.push({ id: newCat.id, name: newCatName });
-              } else {
-                if (__DEV__) console.error('[Agent1] Auto-create category failed:', newCatError);
-                return {
-                  response: "I couldn't find or create a category for this. Please add it manually in Settings → Categories.",
-                  transaction: null,
-                };
-              }
+              const otherCat = (allCategories ?? []).find((c) => c.name.toLowerCase() === 'other');
+              categoryId = otherCat?.id ?? null;
+              matchingScore = 0;
+              proposalForMain = { name: newCatName, emoji: autoEmoji };
+              if (__DEV__) console.log(`[Agent1] Proposing new category "${newCatName}" ${autoEmoji} (saved under Other for now)`);
             }
           }
         }
@@ -1253,12 +1251,26 @@ Current user message: ${userMessage}`;
         };
       }
 
+      const mainTxId = (insertedRow?.[0] as { id?: string } | undefined)?.id;
+      const otherCatId = (allCategories ?? []).find((c) => c.name.toLowerCase() === 'other')?.id ?? null;
+
+      // Category proposals awaiting user confirmation. Merge by name so two
+      // transactions wanting the same new category produce a single prompt.
+      const pendingProposals: CategoryProposal[] = [];
+      const addProposal = (name: string, emoji: string, txId: string) => {
+        const existing = pendingProposals.find((p) => p.name.toLowerCase() === name.toLowerCase());
+        if (existing) existing.transactionIds.push(txId);
+        else pendingProposals.push({ name, emoji, transactionIds: [txId] });
+      };
+      if (proposalForMain && mainTxId) addProposal(proposalForMain.name, proposalForMain.emoji, mainTxId);
+
       // Collect every parsed transaction so the chat can render a card per item.
-      // The primary transaction is first; extras follow below.
+      // The primary transaction is first; extras follow below. Show the proposed
+      // name on the card even though it's saved under "Other" until confirmed.
       const parsedTransactions: ParsedTransaction[] = [{
         amount,
         description,
-        category: categoryName ?? '',
+        category: proposalForMain?.name ?? categoryName ?? '',
         date: new Date().toISOString().slice(0, 10),
         type: type as 'expense' | 'income',
       }];
@@ -1271,6 +1283,7 @@ Current user message: ${userMessage}`;
           const extraRawName = typeof extra.category_id === 'string' ? extra.category_id : '';
           let extraCatId: string | null = extraRawName || null;
           let extraCatName = extraRawName;
+          let extraProposal: { name: string; emoji: string } | null = null;
           if (extraCatId) {
             const uuidRx = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
             if (uuidRx.test(extraCatId)) {
@@ -1281,7 +1294,11 @@ Current user message: ${userMessage}`;
                 .map(c => ({ ...c, score: c.name.toLowerCase() === lower ? 1 : c.name.toLowerCase().includes(lower) || lower.includes(c.name.toLowerCase()) ? 0.85 : 0 }))
                 .sort((a, b) => b.score - a.score)[0];
               if ((best?.score ?? 0) >= 0.7) { extraCatId = best.id; extraCatName = best.name; }
-              else { extraCatId = null; }
+              else {
+                // Unmatched — save under "Other" and propose the new category.
+                extraProposal = { name: extraRawName, emoji: CATEGORY_EMOJI_MAP[lower] ?? '📦' };
+                extraCatId = otherCatId;
+              }
             }
           }
           const extraInsert: Record<string, unknown> = {
@@ -1296,8 +1313,10 @@ Current user message: ${userMessage}`;
             matching_score: 0,
           };
           if (extraCatId) extraInsert.category_id = extraCatId;
-          const { error: extraErr } = await supabase.from('transactions').insert(extraInsert);
+          const { data: extraRow, error: extraErr } = await supabase.from('transactions').insert(extraInsert).select();
           if (extraErr && __DEV__) console.error('[Agent1] Extra transaction insert error:', extraErr);
+          const extraTxId = (extraRow?.[0] as { id?: string } | undefined)?.id;
+          if (extraProposal && extraTxId) addProposal(extraProposal.name, extraProposal.emoji, extraTxId);
           parsedTransactions.push({
             amount: extraAmount,
             description: typeof extra.description === 'string' ? extra.description : '',
@@ -1340,6 +1359,7 @@ Current user message: ${userMessage}`;
         response: finalResponse,
         transaction: parsedTransactions[0],
         transactions: parsedTransactions,
+        categoryProposals: pendingProposals.length ? pendingProposals : undefined,
       };
     }
 
