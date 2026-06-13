@@ -20,8 +20,19 @@ import { colors } from './src/lib/theme';
 import { initSentry } from './src/lib/sentry';
 import { initAnalytics } from './src/lib/analytics';
 
-initSentry();
-initAnalytics();
+// Guard module-load SDK init: a synchronous throw here (e.g. a malformed DSN)
+// would SIGABRT before the ErrorBoundary can mount. Never let telemetry setup
+// take down app launch.
+try {
+  initSentry();
+} catch (e) {
+  console.error('[init] Sentry init failed:', e);
+}
+try {
+  initAnalytics();
+} catch (e) {
+  console.error('[init] Analytics init failed:', e);
+}
 
 type ErrorBoundaryState = { hasError: boolean; message: string };
 

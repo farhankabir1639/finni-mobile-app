@@ -73,12 +73,14 @@ export default function TransactionCard({
       .eq('category_id', matched.id)
       .eq('type', type)
       .gte('date', getWeekStartISO())
-      .then(({ data }) => {
-        const total = (data ?? []).reduce((sum, r) =>
-          sum + (type === 'expense' ? (Number(r.withdrawal) || 0) : (Number(r.deposit) || 0)), 0);
-        setWeeklyTotal(total);
-      })
-      .catch(() => setWeeklyTotal(0));
+      .then(
+        ({ data }) => {
+          const total = (data ?? []).reduce((sum, r) =>
+            sum + (type === 'expense' ? (Number(r.withdrawal) || 0) : (Number(r.deposit) || 0)), 0);
+          setWeeklyTotal(total);
+        },
+        () => setWeeklyTotal(0),
+      );
   }, [userId, matched?.id, type]);
 
   const tagline = weeklyTotal !== null
