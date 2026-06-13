@@ -12,7 +12,7 @@ import {
   ActivityIndicator,
   useWindowDimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfile } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
@@ -72,10 +72,15 @@ function getStart(type: 'day' | 'week' | 'month', now: Date): Date {
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
+// Height of the floating GlassDock's content; the list must scroll clear of it
+// so the last transaction isn't hidden behind the nav bar. Matches HomeScreen.
+const DOCK_CONTENT_H = 86;
+
 export default function TransactionsScreen() {
   const { user } = useAuth();
   const { currencySymbol } = useProfile();
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [allCategories, setAllCategories] = useState<PickerCategory[]>([]);
   const [configuredIncome, setConfiguredIncome] = useState(0);
@@ -269,7 +274,12 @@ export default function TransactionsScreen() {
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            // Clear the floating dock + the device's gesture/home bar so every
+            // transaction (including the last) can scroll fully into view.
+            { paddingBottom: Math.max(insets.bottom, 8) + DOCK_CONTENT_H },
+          ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
@@ -420,7 +430,8 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 8,
-    paddingBottom: 32,
+    // paddingBottom is applied dynamically (insets + dock height) at the
+    // ScrollView so the last transaction clears the floating nav dock.
   },
   title: {
     fontSize: 28,
