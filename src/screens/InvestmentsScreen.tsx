@@ -23,7 +23,7 @@ type Investment = {
   user_id: string;
   name: string;
   ticker: string | null;
-  asset_type: 'stock' | 'crypto' | 'mutual_fund' | 'gold' | 'other';
+  asset_type: 'stock' | 'crypto' | 'mutual_fund' | 'gold' | 'bond' | 'real_estate' | 'other' | string;
   quantity: number;
   buy_price: number;
   current_value: number;
@@ -33,14 +33,16 @@ type Investment = {
   updated_at: string;
 };
 
-type AssetFilter = 'all' | 'stock' | 'crypto' | 'mutual_fund' | 'gold' | 'other';
+type AssetFilter = 'all' | 'stock' | 'crypto' | 'mutual_fund' | 'gold' | 'bond' | 'real_estate' | 'other' | string;
 
 const ASSET_COLORS: Record<string, string> = {
   stock: t.auraViolet,
   crypto: '#FBBF24',
   mutual_fund: t.auraBlue,
   gold: '#FBBF24',
-  other: t.auraAqua,
+  bond: t.auraAqua,
+  real_estate: '#34D399',
+  other: t.text3,
 };
 
 const ASSET_LABELS: Record<string, string> = {
@@ -48,6 +50,8 @@ const ASSET_LABELS: Record<string, string> = {
   crypto: 'Crypto',
   mutual_fund: 'Mutual Funds',
   gold: 'Gold',
+  bond: 'Bonds',
+  real_estate: 'Real Estate',
   other: 'Other',
 };
 
@@ -346,12 +350,17 @@ export default function InvestmentsScreen() {
       current_value: currentVal,
       notes: formNotes.trim() || null,
     };
+    const friendlyError = (msg: string) =>
+      msg.includes('asset_type_check')
+        ? 'That asset type isn\'t supported yet. Please choose from the list or use "Other".'
+        : msg;
+
     if (editingInv) {
       const { error } = await supabase.from('investments').update(payload).eq('id', editingInv.id);
-      if (error) { Alert.alert('Error', error.message); setSaving(false); return; }
+      if (error) { Alert.alert('Error', friendlyError(error.message)); setSaving(false); return; }
     } else {
       const { error } = await supabase.from('investments').insert(payload);
-      if (error) { Alert.alert('Error', error.message); setSaving(false); return; }
+      if (error) { Alert.alert('Error', friendlyError(error.message)); setSaving(false); return; }
     }
     setSaving(false);
     setShowModal(false);
