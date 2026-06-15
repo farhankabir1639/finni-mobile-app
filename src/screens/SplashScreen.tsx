@@ -8,7 +8,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Aurora from '../components/Aurora';
-import Orb from '../components/Orb';
 import FinniLogo from '../components/FinniLogo';
 import { t, fonts } from '../theme/tokens';
 
@@ -44,10 +43,9 @@ export default function SplashScreen() {
       <Aurora width={width} height={height} />
 
       <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
-        <Orb size={140} rings talking />
-        <FinniLogo size={52} wordmarkSize={30} />
+        <FinniLogo size={64} wordmarkSize={36} />
         <Text style={[styles.sub, { fontFamily: fonts.medium }]}>
-          Smart money, zero stress
+          Know where your money goes
         </Text>
       </Animated.View>
 
