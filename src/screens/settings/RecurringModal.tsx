@@ -59,7 +59,7 @@ export default function RecurringModal({ userId, onClose }: { userId: string; on
           ) : items.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyTitle}>No recurring transactions</Text>
-              <Text style={styles.emptySubtitle}>Log an expense in chat, then tap “🔁 Repeat this?” on its card.</Text>
+              <Text style={styles.emptySubtitle}>Log an expense in chat, then tap “🔁 Is this recurring?” on its card.</Text>
             </View>
           ) : (
             items.map((tpl) => (

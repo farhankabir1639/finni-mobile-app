@@ -60,12 +60,12 @@ export default function RecurringBanner({ userId, amount, type, categoryId, desc
     <View style={s.wrap}>
       {picking === null ? (
         <View style={s.row}>
-          <Text style={s.prompt}>🔁 Repeat this?</Text>
+          <Text style={s.prompt}>🔁 Is this recurring?</Text>
           <Pressable hitSlop={6} style={s.chip} onPress={() => setPicking('weekly')}>
-            <Text style={s.chipTxt}>Weekly</Text>
+            <Text style={s.chipTxt}>Every week</Text>
           </Pressable>
           <Pressable hitSlop={6} style={s.chip} onPress={() => setPicking('monthly')}>
-            <Text style={s.chipTxt}>Monthly</Text>
+            <Text style={s.chipTxt}>Every month</Text>
           </Pressable>
         </View>
       ) : (
