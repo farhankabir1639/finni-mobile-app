@@ -387,6 +387,7 @@ export default function TransactionsScreen() {
         categories={allCategories}
         currentCategoryId={selectedTx?.category_id}
         onSelect={handleCategoryChange}
+        onDelete={selectedTx ? () => handleDeleteTransaction(selectedTx.id) : undefined}
       />
 
       {/* Custom date range picker */}

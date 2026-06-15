@@ -14,10 +14,11 @@ interface CategoryPickerSheetProps {
   categories: PickerCategory[];
   currentCategoryId?: string | null;
   onSelect: (categoryId: string) => void;
+  onDelete?: () => void;
 }
 
 export default function CategoryPickerSheet({
-  visible, onClose, categories, currentCategoryId, onSelect,
+  visible, onClose, categories, currentCategoryId, onSelect, onDelete,
 }: CategoryPickerSheetProps) {
   return (
     <Modal
@@ -73,6 +74,19 @@ export default function CategoryPickerSheet({
               </TouchableOpacity>
             );
           })}
+
+          {onDelete && (
+            <TouchableOpacity
+              style={styles.deleteRow}
+              onPress={() => { onDelete(); onClose(); }}
+              activeOpacity={0.75}
+            >
+              <Svg width={18} height={18} viewBox="0 0 24 24">
+                <Path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m2 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14zM10 11v6M14 11v6" stroke={t.red} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+              </Svg>
+              <Text style={[styles.deleteTxt, { fontFamily: fonts.semiBold }]}>Delete transaction</Text>
+            </TouchableOpacity>
+          )}
         </ScrollView>
       </View>
     </Modal>
@@ -144,5 +158,21 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  deleteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginTop: 10,
+    paddingVertical: 13,
+    borderRadius: 14,
+    backgroundColor: 'rgba(251,113,133,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(251,113,133,0.28)',
+  },
+  deleteTxt: {
+    fontSize: 15,
+    color: t.red,
   },
 });
