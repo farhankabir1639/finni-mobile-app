@@ -9,7 +9,8 @@
     "web": "expo start --web",
     "eval:insights": "tsx eval/insights_eval.ts",
     "eval:chat": "tsx eval/chat_eval.ts",
-    "eval:bulk": "tsx eval/bulk_eval.ts"
+    "eval:bulk": "tsx eval/bulk_eval.ts",
+    "eval:recurring": "tsx eval/recurring_eval.ts"
   },
   "dependencies": {
     "@expo-google-fonts/plus-jakarta-sans": "^0.4.2",

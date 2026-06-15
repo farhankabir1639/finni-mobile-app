@@ -18,6 +18,7 @@ import { supabase } from '../lib/supabase';
 import { chatAgent, transcribeAudio } from '../lib/agents';
 import type { ParsedTransaction, CategoryProposal } from '../lib/agents';
 import { addPendingProposals, resolvePendingProposals } from '../lib/categoryProposals';
+import { materializeDueRecurring } from '../lib/recurring';
 import { seedDefaultCategories } from '../lib/seedCategories';
 import { captureError } from '../lib/sentry';
 import { trackEvent, trackScreen } from '../lib/analytics';
@@ -405,6 +406,12 @@ export default function HomeScreen() {
     if (user?.id) resolvePendingProposals(user.id).then((n) => { if (n) fetchChatContext(); });
   }, [user?.id]);
 
+  // On launch, materialize any recurring transactions due since last open
+  // (once-per-day guarded inside the engine). Refresh stats if any were created.
+  useEffect(() => {
+    if (user?.id) materializeDueRecurring(user.id).then((n) => { if (n) { fetchStats(); fetchChatContext(); } });
+  }, [user?.id]);
+
   const fetchStats = useCallback(async () => {
     if (!user?.id) return;
     try {
@@ -723,6 +730,9 @@ export default function HomeScreen() {
                               type={tx.type}
                               categories={chatContext.categories ?? []}
                               currency={chatContext.profile?.currency ?? 'USD'}
+                              description={tx.description}
+                              date={tx.date}
+                              allowRecurring
                             />
                           </View>
                         ))

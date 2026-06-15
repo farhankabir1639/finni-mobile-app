@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { t, fonts } from '../theme/tokens';
+import RecurringBanner from './RecurringBanner';
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$', BDT: '৳', EUR: '€', GBP: '£', AUD: 'A$', CAD: 'C$', SGD: 'S$', INR: '₹',
@@ -43,10 +44,13 @@ export interface TransactionCardProps {
   type: 'expense' | 'income';
   categories: { id: string; name: string; emoji?: string; budget?: number }[];
   currency: string;
+  description?: string;        // originating transaction description (for recurring)
+  date?: string;              // originating transaction date (recurring anchor)
+  allowRecurring?: boolean;   // show the "🔁 Repeat this?" banner (fresh chat logs)
 }
 
 export default function TransactionCard({
-  userId, amount, category, type, categories, currency,
+  userId, amount, category, type, categories, currency, description, date, allowRecurring,
 }: TransactionCardProps) {
   const [weeklyTotal, setWeeklyTotal] = useState<number | null>(null);
 
@@ -116,6 +120,20 @@ export default function TransactionCard({
         <>
           <View style={s.divider} />
           <Text style={s.tagline}>{tagline}</Text>
+        </>
+      ) : null}
+
+      {allowRecurring ? (
+        <>
+          <View style={s.divider} />
+          <RecurringBanner
+            userId={userId}
+            amount={amount}
+            type={type}
+            categoryId={matched?.id ?? null}
+            description={description ?? displayCategory}
+            date={date}
+          />
         </>
       ) : null}
     </View>

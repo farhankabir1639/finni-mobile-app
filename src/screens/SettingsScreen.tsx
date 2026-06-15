@@ -22,6 +22,7 @@ import CurrencyModal from './settings/CurrencyModal';
 import IncomeModal from './settings/IncomeModal';
 import GoalsModal from './settings/GoalsModal';
 import NotificationsModal from './settings/NotificationsModal';
+import RecurringModal from './settings/RecurringModal';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -72,6 +73,7 @@ export default function SettingsScreen() {
   const [incomeModalVisible, setIncomeModalVisible] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [notificationsVisible, setNotificationsVisible] = useState(false);
+  const [recurringModalVisible, setRecurringModalVisible] = useState(false);
 
   const handleSignOut = () => {
     Alert.alert(
@@ -201,6 +203,7 @@ export default function SettingsScreen() {
           <Text style={styles.sectionLabel}>Finance</Text>
           <SettingsRow label="Categories" icon="🏷️" color={t.catShopping} onPress={() => setCategoriesModalVisible(true)} />
           <SettingsRow label="Goals" icon="🎯" color={t.cyan} onPress={() => setGoalsModalVisible(true)} />
+          <SettingsRow label="Recurring" icon="🔁" color={t.auraIndigo} onPress={() => setRecurringModalVisible(true)} />
         </View>
 
         {/* Notifications */}
@@ -264,6 +267,10 @@ export default function SettingsScreen() {
 
       <Modal visible={goalsModalVisible} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setGoalsModalVisible(false)}>
         <GoalsModal userId={user?.id ?? ''} onClose={() => setGoalsModalVisible(false)} />
+      </Modal>
+
+      <Modal visible={recurringModalVisible} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setRecurringModalVisible(false)}>
+        <RecurringModal userId={user?.id ?? ''} onClose={() => setRecurringModalVisible(false)} />
       </Modal>
 
       <Modal visible={editProfileVisible} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setEditProfileVisible(false)}>
