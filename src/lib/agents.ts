@@ -176,6 +176,24 @@ async function callGeminiWithHistory(
   }
 }
 
+// --- Grounded generation helper (used by the insights pipeline) ---
+// Single-shot text generation over the shared Gemini transport (proxy + direct
+// fallback). The insights layer computes every number itself and only asks
+// Gemini to phrase it, so this is a thin pass-through with a low token ceiling.
+export async function generateGroundedText(
+  prompt: string,
+  opts?: { temperature?: number; maxOutputTokens?: number }
+): Promise<string> {
+  return callGeminiWithHistory(
+    [{ role: 'user', parts: [{ text: prompt }] }],
+    0,
+    {
+      temperature: opts?.temperature ?? 0.5,
+      maxOutputTokens: opts?.maxOutputTokens ?? 512,
+    }
+  );
+}
+
 // --- AGENT 1: Parse transaction from receipt/text ---
 export type ParsedTransaction = {
   amount: number;

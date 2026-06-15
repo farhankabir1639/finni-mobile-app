@@ -31,6 +31,8 @@ import ArcMeter from '../components/ArcMeter';
 import GlassCard from '../components/GlassCard';
 import TransactionCard from '../components/TransactionCard';
 import CategoryProposalCard from '../components/CategoryProposalCard';
+import FinniInsightCard from '../components/FinniInsightCard';
+import type { InsightContext } from '../lib/insights';
 import { t, fonts } from '../theme/tokens';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -196,6 +198,24 @@ export default function HomeScreen() {
     if (pct >= 100) return `${top.emoji ?? ''} ${top.name} exceeded budget this month`.trim();
     return `${top.emoji ?? ''} ${top.name} is at ${pct}% of budget this month`.trim();
   }, [chatContext.categories]);
+
+  // Context the grounded insights pipeline reasons over (data we already hold).
+  const insightCtx = useMemo<InsightContext | null>(() => {
+    if (!user?.id) return null;
+    return {
+      userId: user.id,
+      region: null, // TODO: wire onboarding city once it's on the profile row
+      currency: chatContext.profile?.currency ?? 'USD',
+      currencySymbol,
+      monthlyIncome: monthlyBudget,
+      monthSpent,
+      monthElapsedPct,
+      monthName,
+      categories: chatContext.categories ?? [],
+      goals: chatContext.goals ?? [],
+      transactionCount: chatContext.recentTransactions?.length ?? 0,
+    };
+  }, [user?.id, chatContext, currencySymbol, monthlyBudget, monthSpent, monthElapsedPct, monthName]);
 
   // ── Waveform ───────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -659,21 +679,11 @@ export default function HomeScreen() {
                 </View>
               </View>
 
-              {finnisNoticed ? (
-                <TouchableOpacity
-                  style={styles.noticedWrap}
-                  onPress={() => navigation.navigate('Analytics' as never)}
-                  activeOpacity={0.85}
-                >
-                  <GlassCard style={styles.noticedCard} borderRadius={t.rLg} intensity={22}>
-                    <View style={styles.noticedTop}>
-                      <Text style={[styles.noticedBadge, { fontFamily: fonts.semiBold }]}>✦ Finni noticed</Text>
-                      <Text style={styles.noticedArrow}>→</Text>
-                    </View>
-                    <Text style={[styles.noticedText, { fontFamily: fonts.regular }]}>{finnisNoticed}</Text>
-                  </GlassCard>
-                </TouchableOpacity>
-              ) : null}
+              <FinniInsightCard
+                ctx={insightCtx}
+                fallbackText={finnisNoticed}
+                onOpen={() => navigation.navigate('Analytics' as never)}
+              />
             </View>
 
             {/* Inline chips — empty state */}
