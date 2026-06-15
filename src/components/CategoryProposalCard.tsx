@@ -83,6 +83,8 @@ export default function CategoryProposalCard({ userId, proposals, onResolved }: 
           <Text style={s.createAllTxt}>Create all</Text>
         </Pressable>
       )}
+
+      <Text style={s.footnote}>You can change or delete any transaction anytime in the Wallet tab.</Text>
     </View>
   );
 }
@@ -102,6 +104,12 @@ const s = StyleSheet.create({
     fontSize: 15,
     fontFamily: fonts.bold,
     color: t.text,
+  },
+  footnote: {
+    fontSize: 11,
+    fontFamily: fonts.regular,
+    color: t.text3,
+    marginTop: 12,
   },
   sub: {
     fontSize: 12.5,

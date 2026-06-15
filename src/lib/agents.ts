@@ -190,6 +190,10 @@ export async function generateGroundedText(
     {
       temperature: opts?.temperature ?? 0.5,
       maxOutputTokens: opts?.maxOutputTokens ?? 512,
+      // gemini-2.5-flash is a thinking model; for a short phrasing task the
+      // thinking budget would otherwise eat the whole output allowance and
+      // return empty text. Disable it — no reasoning needed to phrase facts.
+      thinkingConfig: { thinkingBudget: 0 },
     }
   );
 }
