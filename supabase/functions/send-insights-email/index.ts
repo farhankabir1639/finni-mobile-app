@@ -50,8 +50,18 @@ async function coachFields(name: string, currency: string, a: EmailAnalytics, fr
     ? `{"greeting":"...","insight":"...","focus":"..."} (greeting: 1 warm sentence ≤20 words; insight: 1-2 reflective sentences on the week; focus: a short phrase completing "Next week — ...")`
     : `{"greeting":"...","insight":"..."} (greeting: 1 warm sentence ≤20 words; insight: 1-2 supportive coaching sentences for today)`;
 
+  const COUNTRY: Record<string, string> = {
+    BDT: 'Bangladesh', INR: 'India', PKR: 'Pakistan', LKR: 'Sri Lanka', NPR: 'Nepal',
+    USD: 'the US', GBP: 'the UK', EUR: 'the Eurozone', AUD: 'Australia', CAD: 'Canada', SGD: 'Singapore',
+  };
+  const place = COUNTRY[currency] ?? null;
+  const localCtx = place
+    ? `The user lives in ${place}. Make every suggestion realistic for local costs and norms — never propose impractically low daily targets (e.g. an unlivable daily food budget). If a category is nearly exhausted, acknowledge it honestly rather than demanding an unrealistic cut.`
+    : '';
+
   const prompt = `You are Finni, a warm, encouraging personal-finance coach. Write the coach copy for ${name}'s ${freq} email.
 Use ONLY the numbers in FACTS — NEVER state, compute, or invent any figure not present. Currency symbol is "${sym}". Be specific, kind, motivating, never preachy.
+${localCtx}
 FACTS: ${JSON.stringify(facts)}
 Return ONLY minified JSON: ${wants}`;
 

@@ -77,6 +77,13 @@ export function computeAnalytics(
       const emoji = c.emoji ?? '📦';
       if (remaining <= 0) return { name: c.name, emoji, status: 'over' as const, line: `${formatCurrency(_currency, -remaining)} over budget — pause if you can` };
       const perDay = remaining / daysLeft;
+      const naturalDaily = budget / dim; // the user's OWN plan's daily rate = realism baseline
+      // When the remaining daily allowance falls well below the category's own
+      // natural daily rate, a "keep today under ৳X" micro-target is unrealistic
+      // (e.g. ৳67/day for food in BD). Reframe to a running-low nudge instead.
+      if (perDay < naturalDaily * 0.5) {
+        return { name: c.name, emoji, status: 'tight' as const, line: `${formatCurrency(_currency, remaining)} left this month — running low, ease off` };
+      }
       const usedPct = budget > 0 ? (spent / budget) * 100 : 0;
       const status: 'ok' | 'tight' = usedPct > monthElapsedPct + 10 ? 'tight' : 'ok';
       return { name: c.name, emoji, status, line: `${formatCurrency(_currency, remaining)} left — keep today under ${formatCurrency(_currency, perDay)}` };
