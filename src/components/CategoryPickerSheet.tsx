@@ -2,6 +2,7 @@ import React from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { t, fonts } from '../theme/tokens';
 import CatIcon, { getCatConfig } from './CatIcon';
@@ -20,6 +21,7 @@ interface CategoryPickerSheetProps {
 export default function CategoryPickerSheet({
   visible, onClose, categories, currentCategoryId, onSelect, onDelete,
 }: CategoryPickerSheetProps) {
+  const insets = useSafeAreaInsets();
   return (
     <Modal
       visible={visible}
@@ -40,7 +42,7 @@ export default function CategoryPickerSheet({
         </View>
 
         <ScrollView
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: Math.max(insets.bottom, 16) + 24 }]}
           showsVerticalScrollIndicator={false}
         >
           {categories.map(cat => {

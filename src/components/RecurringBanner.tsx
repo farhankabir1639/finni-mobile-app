@@ -59,14 +59,16 @@ export default function RecurringBanner({ userId, amount, type, categoryId, desc
   return (
     <View style={s.wrap}>
       {picking === null ? (
-        <View style={s.row}>
+        <View style={s.idleCol}>
           <Text style={s.prompt}>🔁 Is this recurring?</Text>
-          <Pressable hitSlop={6} style={s.chip} onPress={() => setPicking('weekly')}>
-            <Text style={s.chipTxt}>Every week</Text>
-          </Pressable>
-          <Pressable hitSlop={6} style={s.chip} onPress={() => setPicking('monthly')}>
-            <Text style={s.chipTxt}>Every month</Text>
-          </Pressable>
+          <View style={s.chipRow}>
+            <Pressable hitSlop={6} style={s.chip} onPress={() => setPicking('weekly')}>
+              <Text style={s.chipTxt}>Every week</Text>
+            </Pressable>
+            <Pressable hitSlop={6} style={s.chip} onPress={() => setPicking('monthly')}>
+              <Text style={s.chipTxt}>Every month</Text>
+            </Pressable>
+          </View>
         </View>
       ) : (
         <View style={s.pickerCol}>
@@ -91,8 +93,9 @@ export default function RecurringBanner({ userId, amount, type, categoryId, desc
 
 const s = StyleSheet.create({
   wrap: { paddingHorizontal: 14, paddingTop: 4, paddingBottom: 12 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  prompt: { flex: 1, fontSize: 12.5, fontFamily: fonts.regular, color: t.text3 },
+  idleCol: { gap: 9 },
+  chipRow: { flexDirection: 'row', gap: 8 },
+  prompt: { fontSize: 12.5, fontFamily: fonts.regular, color: t.text3 },
   chip: {
     paddingHorizontal: 12, paddingVertical: 6, borderRadius: 9,
     borderWidth: 1, borderColor: t.glassLine2, backgroundColor: 'rgba(255,255,255,0.04)',
