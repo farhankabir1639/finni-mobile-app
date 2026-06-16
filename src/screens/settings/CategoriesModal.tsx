@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, TextInput, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform, Alert, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, TextInput, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform, Alert, Dimensions, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useProfile } from '../../contexts/ProfileContext';
 import { supabase } from '../../lib/supabase';
@@ -7,6 +7,7 @@ import { t, fonts } from '../../theme/tokens';
 import { styles } from './settingsStyles';
 import Aurora from '../../components/Aurora';
 import GlassCard from '../../components/GlassCard';
+import BudgetModelSheet from './BudgetModelSheet';
 import type { Category, BudgetPeriod } from './types';
 
 const { width: SW, height: SH } = Dimensions.get('window');
@@ -35,7 +36,7 @@ export default function CategoriesModal({ userId, onClose }: { userId: string; o
   const [editBudget, setEditBudget] = useState('');
   const [editBudgetType, setEditBudgetType] = useState<BudgetPeriod>('monthly');
   const [updating, setUpdating] = useState(false);
-  const [autoAssigning, setAutoAssigning] = useState(false);
+  const [showBudgetSheet, setShowBudgetSheet] = useState(false);
 
   const fetchCategories = async () => {
     if (!userId) return;
@@ -97,35 +98,8 @@ export default function CategoriesModal({ userId, onClose }: { userId: string; o
     fetchCategories();
   };
 
-  const handleAutoAssignBudgets = () => {
-    Alert.alert(
-      '✨ AI Budget',
-      'This will automatically set a monthly budget for each category based on your income and spending patterns.\n\nCurrent budgets will be overwritten.',
-      [{ text: 'Cancel', style: 'cancel' }, { text: 'Apply', onPress: runAutoAssign }]
-    );
-  };
-
-  const runAutoAssign = async () => {
-    if (!userId || categories.length === 0) return;
-    setAutoAssigning(true);
-    const { data: incomeData } = await supabase.from('income').select('amount, frequency').eq('user_id', userId);
-    const monthlyIncome = (incomeData ?? []).reduce((sum, r) => {
-      const amt = Number(r.amount) || 0;
-      if (r.frequency === 'weekly') return sum + amt * 4.33;
-      if (r.frequency === 'annual') return sum + amt / 12;
-      return sum + amt;
-    }, 0);
-    if (monthlyIncome === 0) { Alert.alert('No Income', 'Add an income source first.'); setAutoAssigning(false); return; }
-    const totalSpent = categories.reduce((sum, c) => sum + (c.spent ?? 0), 0);
-    await Promise.all(categories.map((cat) => {
-      const share = totalSpent > 0 ? (cat.spent ?? 0) / totalSpent : 1 / categories.length;
-      const budget = Math.round(monthlyIncome * share * 100) / 100;
-      return supabase.from('categories').update({ budget, type: 'monthly' }).eq('id', cat.id).eq('user_id', userId);
-    }));
-    setAutoAssigning(false);
-    Alert.alert('Done', 'Budgets assigned based on your spending patterns.');
-    fetchCategories();
-  };
+  // Smart Budget (model-based) lives in BudgetModelSheet — opened from the
+  // "AI Budget" button below.
 
   const handleDeleteCategory = (id: string, name: string) => {
     Alert.alert('Delete Category', `Delete "${name}"? Linked transactions will be uncategorized.`, [
@@ -208,13 +182,9 @@ export default function CategoriesModal({ userId, onClose }: { userId: string; o
           {/* Quick actions */}
           {!showAddForm && !editingCategory && (
             <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 22, paddingBottom: 12 }}>
-              <TouchableOpacity style={styles.aiBudgetBtn} onPress={handleAutoAssignBudgets} disabled={autoAssigning} activeOpacity={0.8}>
-                {autoAssigning ? <ActivityIndicator size="small" color={t.auraAqua} /> : (
-                  <>
-                    <Text style={{ fontSize: 16 }}>✨</Text>
-                    <Text style={styles.aiBudgetText}>AI Budget</Text>
-                  </>
-                )}
+              <TouchableOpacity style={styles.aiBudgetBtn} onPress={() => setShowBudgetSheet(true)} disabled={categories.length === 0} activeOpacity={0.8}>
+                <Text style={{ fontSize: 16 }}>✨</Text>
+                <Text style={styles.aiBudgetText}>Smart Budget</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.addBtn, { flex: 1, justifyContent: 'center' }]} onPress={() => setShowAddForm(true)} activeOpacity={0.8}>
                 <Text style={{ fontSize: 14, color: '#fff' }}>+</Text>
@@ -286,6 +256,16 @@ export default function CategoriesModal({ userId, onClose }: { userId: string; o
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+
+      <Modal visible={showBudgetSheet} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setShowBudgetSheet(false)}>
+        <BudgetModelSheet
+          userId={userId}
+          categories={categories}
+          currencySymbol={currencySymbol}
+          onClose={() => setShowBudgetSheet(false)}
+          onApplied={fetchCategories}
+        />
+      </Modal>
     </View>
   );
 }

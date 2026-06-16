@@ -200,6 +200,35 @@ export async function generateGroundedText(
   );
 }
 
+// --- Category → budget-bucket classification (labels only, no numbers) ---
+// Used by the Smart Budget feature. Returns a map of category name → bucket.
+// The caller applies keyword classification first and only asks the model about
+// the leftovers, then falls back to 'wants' for anything still unresolved.
+export async function classifyCategoryBuckets(
+  names: string[]
+): Promise<Record<string, 'needs' | 'wants' | 'savings'>> {
+  if (!names.length) return {};
+  try {
+    const prompt = `Classify each personal-finance category into EXACTLY one bucket:
+- "needs": essentials (food, groceries, rent, bills, utilities, transport, health, education, insurance, debt/loan)
+- "wants": discretionary (entertainment, shopping, dining out, hobbies, treats, travel, subscriptions)
+- "savings": savings, investments, emergency fund, retirement, financial goals
+Return ONLY minified JSON mapping each exact category name to its bucket, e.g. {"Food":"needs","Netflix":"wants"}.
+Categories: ${JSON.stringify(names)}`;
+    const text = await generateGroundedText(prompt, { temperature: 0.1, maxOutputTokens: 512 });
+    const cleaned = text.replace(/```json?|```/g, '').trim();
+    const parsed = JSON.parse(cleaned) as Record<string, string>;
+    const out: Record<string, 'needs' | 'wants' | 'savings'> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (v === 'needs' || v === 'wants' || v === 'savings') out[k] = v;
+    }
+    return out;
+  } catch (e) {
+    if (__DEV__) console.log('[classifyCategoryBuckets] failed:', e);
+    return {};
+  }
+}
+
 // --- AGENT 1: Parse transaction from receipt/text ---
 export type ParsedTransaction = {
   amount: number;
