@@ -10,8 +10,8 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import {
-  computeAnalytics, buildEmailHtml, formatCurrency,
-  type Txn, type Cat, type Freq, type EmailAnalytics,
+  computeAnalytics, renderEmail, symbolOf,
+  type Txn, type Cat, type Freq, type EmailAnalytics, type AiFields,
 } from './_email_template.ts';
 
 const RESEND_API_KEY       = Deno.env.get('RESEND_API_KEY')!;
@@ -26,37 +26,61 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 const isMonday = () => new Date().getDay() === 1;
 const dateStr = (d: Date) => d.toISOString().split('T')[0];
 
-// Grounded warm line: Gemini phrases the computed numbers, never invents one.
-async function warmLine(name: string, currency: string, a: EmailAnalytics, freq: Freq): Promise<string> {
-  const fallback = a.onTrack
-    ? `You're pacing well — ${a.monthUsedPct}% of your monthly budget used. Keep it up!`
-    : `Heads up: you're at ${a.monthUsedPct}% of your monthly budget. Let's ease off a bit.`;
+// Grounded coach fields: Gemini phrases the computed numbers, never invents one.
+// Returns greeting + insight (+ weekly focus). Any field with an untraceable
+// number is replaced by a safe deterministic fallback.
+async function coachFields(name: string, currency: string, a: EmailAnalytics, freq: Freq): Promise<AiFields> {
+  const sym = symbolOf(currency);
+  const greetFb = a.onTrack
+    ? `You're pacing well — ${a.monthUsedPct}% of your monthly budget used. Nice and steady.`
+    : `Heads up — you're at ${a.monthUsedPct}% of your monthly budget. Let's ease off a touch.`;
+  const top = a.topCategories[0]?.name ?? 'spending';
+  const insightFb = a.onTrack
+    ? `Your spending is under control this ${freq === 'daily' ? 'day' : 'week'}. ${top} led the way — keep being intentional with it.`
+    : `${top} is your biggest driver right now. A small trim there is the quickest win.`;
+  const focusFb = `keep an eye on ${top} and check in daily — small daily awareness beats end-of-month surprises.`;
+
   const facts = {
     spent: Math.round(a.totalSpent), income: Math.round(a.totalIncome),
     month_used_pct: a.monthUsedPct, on_track: a.onTrack,
     top_category: a.topCategories[0]?.name ?? null,
+    over_budget_categories: a.todos.filter((t) => t.status === 'over').map((t) => t.name),
   };
-  const prompt = `You are Finni, a warm personal-finance companion. Write ONE short, friendly sentence (max 22 words) for ${name}'s ${freq} email, using ONLY these facts. Never state any number not in the facts. No greeting (it's added separately).
+  const wants = freq === 'weekly'
+    ? `{"greeting":"...","insight":"...","focus":"..."} (greeting: 1 warm sentence ≤20 words; insight: 1-2 reflective sentences on the week; focus: a short phrase completing "Next week — ...")`
+    : `{"greeting":"...","insight":"..."} (greeting: 1 warm sentence ≤20 words; insight: 1-2 supportive coaching sentences for today)`;
+
+  const prompt = `You are Finni, a warm, encouraging personal-finance coach. Write the coach copy for ${name}'s ${freq} email.
+Use ONLY the numbers in FACTS — NEVER state, compute, or invent any figure not present. Currency symbol is "${sym}". Be specific, kind, motivating, never preachy.
 FACTS: ${JSON.stringify(facts)}
-Currency symbol context: ${formatCurrency(currency, 0).replace('0', '')}
-Return ONLY the sentence, no quotes.`;
+Return ONLY minified JSON: ${wants}`;
+
   try {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { temperature: 0.5, maxOutputTokens: 80, thinkingConfig: { thinkingBudget: 0 } } }),
+        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { temperature: 0.55, maxOutputTokens: 300, thinkingConfig: { thinkingBudget: 0 } } }),
       },
     );
     const data = await res.json();
-    const text: string = (data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '').trim().replace(/^["']|["']$/g, '');
-    // Lightweight grounding guard: reject if it introduces an untraceable number.
+    const raw = (data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '').replace(/```json?|```/g, '').trim();
+    const p = JSON.parse(raw) as Partial<AiFields>;
+
+    // Grounding guard per field: any untraceable number → use the fallback.
     const allowed = new Set([facts.spent, facts.income, facts.month_used_pct].map(String));
-    const nums = (text.match(/\d[\d,]*/g) ?? []).map((s) => s.replace(/,/g, ''));
-    const grounded = nums.every((n) => allowed.has(n) || allowed.has(String(Math.round(Number(n)))));
-    return text && grounded ? text : fallback;
+    const grounded = (s?: string): boolean => {
+      if (!s) return false;
+      const nums = (s.match(/\d[\d,]*/g) ?? []).map((n) => n.replace(/,/g, ''));
+      return nums.every((n) => allowed.has(n) || allowed.has(String(Math.round(Number(n)))));
+    };
+    return {
+      greeting: grounded(p.greeting) ? p.greeting!.trim() : greetFb,
+      insight: grounded(p.insight) ? p.insight!.trim() : insightFb,
+      focus: freq === 'weekly' ? (grounded(p.focus) ? p.focus!.trim() : focusFb) : undefined,
+    };
   } catch {
-    return fallback;
+    return { greeting: greetFb, insight: insightFb, focus: freq === 'weekly' ? focusFb : undefined };
   }
 }
 
@@ -112,9 +136,10 @@ Deno.serve(async (req) => {
       const monthTxns = all.filter((t) => dateStr(new Date(t.date)) >= monthStart);
 
       const analytics = computeAnalytics(periodTxns, monthTxns, (catData ?? []) as Cat[], currency, today);
-      const line = await warmLine(name, currency, analytics, freq);
+      const ai = await coachFields(name, currency, analytics, freq);
       const subject = freq === 'daily' ? '📊 Your Finni daily snapshot' : '📊 Your Finni weekly summary';
-      const html = buildEmailHtml(name, currency, analytics, line, freq);
+      const appUrl = 'finni-app://home';
+      const html = renderEmail(freq, name, currency, analytics, ai, appUrl);
 
       await sendEmail(email, subject, html);
       sent++;

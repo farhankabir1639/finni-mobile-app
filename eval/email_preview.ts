@@ -5,7 +5,7 @@
  * Writes .verify/email-preview-daily.html and -weekly.html (open in a browser).
  */
 import { writeFileSync } from 'node:fs';
-import { computeAnalytics, buildEmailHtml, type Txn, type Cat } from '../supabase/functions/send-insights-email/_email_template';
+import { computeAnalytics, renderEmail, type Txn, type Cat } from '../supabase/functions/send-insights-email/_email_template';
 
 const today = new Date('2026-06-16T12:00:00');
 const cats: Cat[] = [
@@ -33,10 +33,16 @@ const weeklyPeriod = monthTxns.filter((t) => t.date >= '2026-06-09');
 const daily = computeAnalytics(dailyPeriod, monthTxns, cats, 'BDT', today);
 const weekly = computeAnalytics(weeklyPeriod, monthTxns, cats, 'BDT', today);
 
-writeFileSync('.verify/email-preview-daily.html',
-  buildEmailHtml('Farhan', 'BDT', daily, "You're pacing well — 41% of your monthly budget used. Nice and steady.", 'daily'));
-writeFileSync('.verify/email-preview-weekly.html',
-  buildEmailHtml('Farhan', 'BDT', weekly, "Solid week — spending stayed under control across most categories.", 'weekly'));
+writeFileSync('.verify/email-preview-daily.html', renderEmail('daily', 'Farhan', 'BDT', daily, {
+  greeting: "You're pacing well — 41% of your monthly budget used. Nice and steady.",
+  insight: 'Food took the biggest bite today, but nothing alarming. Keep logging and you stay in control.',
+}, 'finni-app://home'));
+
+writeFileSync('.verify/email-preview-weekly.html', renderEmail('weekly', 'Farhan', 'BDT', weekly, {
+  greeting: 'Solid week — spending stayed under control across most categories.',
+  insight: 'Shopping led your week and nudged the budget. Worth a quick look before it becomes a habit.',
+  focus: 'set a soft cap on Shopping and lean on your steadier categories.',
+}, 'finni-app://home'));
 
 console.log('Wrote .verify/email-preview-daily.html and .verify/email-preview-weekly.html');
 console.log('Daily todos:', daily.todos.map((t) => `${t.name}:${t.status}`).join(', '));

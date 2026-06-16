@@ -1,50 +1,41 @@
-// Pure email analytics + template — no Deno/Node globals, so it's shared by the
-// edge function (index.ts) AND the preview generator (eval/email_preview.ts).
-// All numbers are computed here deterministically; the LLM only phrases a warm
-// line (passed in), never computes a figure.
+// Pure email analytics + renderer — no Deno/Node globals, shared by the edge
+// function (index.ts) and the preview generator (eval/email_preview.ts).
+// All numbers are computed here deterministically; the LLM only writes the
+// coach prose (passed in as `ai`), never a figure.
+//
+// Templates are the user's email-client-safe (table-based, MSO-conditional)
+// designs, parameterized with {{...}} placeholders.
 
 export type Freq = 'daily' | 'weekly';
 
 export interface Txn {
   description: string | null;
-  withdrawal: number;
-  deposit: number;
-  type: string;
-  date: string;
-  category_id?: string | null;
+  withdrawal: number; deposit: number;
+  type: string; date: string; category_id?: string | null;
 }
 export interface Cat { id: string; name: string; emoji?: string; budget?: number }
-
 export interface Todo { name: string; emoji: string; status: 'ok' | 'tight' | 'over'; line: string }
 export interface TopCat { name: string; emoji: string; amount: number; pct: number }
-
 export interface EmailAnalytics {
-  totalSpent: number;
-  totalIncome: number;
-  topCategories: TopCat[];
-  todos: Todo[];
-  monthUsedPct: number;
-  monthElapsedPct: number;
-  onTrack: boolean;
+  totalSpent: number; totalIncome: number;
+  topCategories: TopCat[]; todos: Todo[];
+  monthUsedPct: number; monthElapsedPct: number; onTrack: boolean;
 }
+// AI coach fields (grounded; generated in index.ts).
+export interface AiFields { greeting: string; insight: string; focus?: string }
 
 const SYMBOLS: Record<string, string> = {
   USD: '$', BDT: '৳', EUR: '€', GBP: '£', AUD: 'A$', CAD: 'C$', SGD: 'S$', INR: '₹',
 };
-export function formatCurrency(code: string, amount: number): string {
-  const n = Math.round(amount).toLocaleString('en-US');
-  return `${SYMBOLS[code] ?? code}${n}`;
-}
+export function symbolOf(code: string): string { return SYMBOLS[code] ?? code; }
+export function formatAmount(n: number): string { return Math.round(n).toLocaleString('en-US'); }
+export function formatCurrency(code: string, amount: number): string { return `${symbolOf(code)}${formatAmount(amount)}`; }
 
 function daysInMonth(y: number, m: number): number { return new Date(y, m, 0).getDate(); }
 const num = (v: unknown) => Number(v) || 0;
 
 export function computeAnalytics(
-  periodTxns: Txn[],
-  monthTxns: Txn[],
-  categories: Cat[],
-  currency: string,
-  today: Date,
+  periodTxns: Txn[], monthTxns: Txn[], categories: Cat[], _currency: string, today: Date,
 ): EmailAnalytics {
   const catById = new Map(categories.map((c) => [c.id, c]));
   const emojiOf = (id?: string | null) => (id && catById.get(id)?.emoji) || '📦';
@@ -53,7 +44,6 @@ export function computeAnalytics(
   const totalSpent = periodTxns.filter((t) => t.type === 'expense').reduce((s, t) => s + num(t.withdrawal), 0);
   const totalIncome = periodTxns.filter((t) => t.type === 'income').reduce((s, t) => s + num(t.deposit), 0);
 
-  // Top categories for the period.
   const periodByCat = new Map<string, number>();
   for (const t of periodTxns) {
     if (t.type !== 'expense') continue;
@@ -62,10 +52,8 @@ export function computeAnalytics(
   }
   const topCategories: TopCat[] = [...periodByCat.entries()]
     .map(([id, amount]) => ({ name: nameOf(id), emoji: emojiOf(id), amount, pct: totalSpent > 0 ? Math.round((amount / totalSpent) * 100) : 0 }))
-    .sort((a, b) => b.amount - a.amount)
-    .slice(0, 4);
+    .sort((a, b) => b.amount - a.amount).slice(0, 5);
 
-  // Month-to-date per category, for budget pacing + daily allowances.
   const monthByCat = new Map<string, number>();
   let monthSpent = 0;
   for (const t of monthTxns) {
@@ -80,7 +68,6 @@ export function computeAnalytics(
   const daysLeft = Math.max(1, dim - d + 1);
   const monthElapsedPct = Math.round((d / dim) * 100);
 
-  // Daily to-dos: only for categories with a budget set.
   const todos: Todo[] = categories
     .filter((c) => num(c.budget) > 0)
     .map((c) => {
@@ -88,13 +75,11 @@ export function computeAnalytics(
       const budget = num(c.budget);
       const remaining = budget - spent;
       const emoji = c.emoji ?? '📦';
-      if (remaining <= 0) {
-        return { name: c.name, emoji, status: 'over' as const, line: `${formatCurrency(currency, -remaining)} over budget — pause if you can` };
-      }
+      if (remaining <= 0) return { name: c.name, emoji, status: 'over' as const, line: `${formatCurrency(_currency, -remaining)} over budget — pause if you can` };
       const perDay = remaining / daysLeft;
       const usedPct = budget > 0 ? (spent / budget) * 100 : 0;
       const status: 'ok' | 'tight' = usedPct > monthElapsedPct + 10 ? 'tight' : 'ok';
-      return { name: c.name, emoji, status, line: `${formatCurrency(currency, remaining)} left — keep today under ${formatCurrency(currency, perDay)}` };
+      return { name: c.name, emoji, status, line: `${formatCurrency(_currency, remaining)} left — keep today under ${formatCurrency(_currency, perDay)}` };
     })
     .sort((a, b) => (a.status === 'over' ? -1 : b.status === 'over' ? 1 : a.status === 'tight' ? -1 : 1))
     .slice(0, 5);
@@ -102,99 +87,122 @@ export function computeAnalytics(
   const totalBudget = categories.reduce((s, c) => s + num(c.budget), 0);
   const monthUsedPct = totalBudget > 0 ? Math.round((monthSpent / totalBudget) * 100) : 0;
   const onTrack = monthUsedPct <= monthElapsedPct;
-
   return { totalSpent, totalIncome, topCategories, todos, monthUsedPct, monthElapsedPct, onTrack };
 }
 
-// ── HTML ─────────────────────────────────────────────────────────────────────
-const C = {
-  bg: '#07070E', card: '#0D1322', card2: '#141A2E', line: 'rgba(255,255,255,0.07)',
-  text: '#F4F6FC', text2: '#97A3BD', text3: '#57647F',
-  aqua: '#5EEAD4', rose: '#FB7185', green: '#34D399', indigo: '#6366F1', amber: '#FBBF24',
-};
-
-function bar(pct: number, color: string): string {
-  return `<div style="height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;">
-    <div style="height:6px;width:${Math.min(100, pct)}%;background:${color};border-radius:3px;"></div></div>`;
+// ── Row + section builders ───────────────────────────────────────────────────
+function categoryRows(cats: TopCat[], sym: string): string {
+  if (!cats.length) return `<tr><td style="font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#6b7288;padding:8px 0;">No spending logged.</td></tr>`;
+  return cats.map((c, i) => {
+    const bt = i === 0 ? '' : 'border-top:1px solid #161a28;';
+    return `<tr>
+      <td align="left" style="font-family:Helvetica,Arial,sans-serif;font-size:15px;color:#e6e8f0;padding:8px 0;${bt}">${c.emoji}&nbsp;&nbsp;${c.name}</td>
+      <td align="right" style="font-family:Helvetica,Arial,sans-serif;font-size:15px;color:#ffffff;font-weight:600;padding:8px 0;${bt}">${sym}${formatAmount(c.amount)} <span style="color:#6b7288;font-weight:400;">&middot; ${c.pct}%</span></td>
+    </tr>`;
+  }).join('');
 }
 
-export function buildEmailHtml(
-  name: string,
-  currency: string,
-  a: EmailAnalytics,
-  warmLine: string,
-  freq: Freq,
-): string {
-  const period = freq === 'daily' ? 'today' : 'this week';
-  const Period = freq === 'daily' ? 'Today' : 'This week';
+function gamePlanSection(todos: Todo[]): string {
+  if (!todos.length) return '';
+  const rows = todos.map((td, i) => {
+    const dot = td.status === 'over' ? '#ff5e7e' : td.status === 'tight' ? '#fbbf24' : '#34d399';
+    const bt = i === 0 ? '' : 'border-top:1px solid #161a28;';
+    return `<tr><td style="padding:11px 0;${bt}font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#9aa1b4;">
+      <span style="color:${dot};font-size:15px;">&#9679;</span>&nbsp;&nbsp;${td.emoji}&nbsp;<strong style="color:#ffffff;font-weight:700;">${td.name}</strong> &mdash; ${td.line}</td></tr>`;
+  }).join('');
+  return `
+        <tr><td class="px" style="padding:30px 40px 0 40px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="border-top:1px solid #1b2030;font-size:0;line-height:0;">&nbsp;</td></tr></table></td></tr>
+        <tr><td class="px" style="padding:30px 40px 6px 40px;"><p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:12px;font-weight:600;letter-spacing:1.4px;text-transform:uppercase;color:#6b7288;">Today's game plan</p></td></tr>
+        <tr><td class="px" style="padding:0 40px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${rows}</table></td></tr>`;
+}
 
-  const topHtml = a.topCategories.length
-    ? a.topCategories.map((c) => `
-      <div style="margin-bottom:12px;">
-        <div style="display:flex;justify-content:space-between;font-size:13px;color:${C.text};margin-bottom:5px;">
-          <span>${c.emoji} ${c.name}</span><span style="color:${C.text2};font-weight:600;">${formatCurrency(currency, c.amount)} · ${c.pct}%</span>
-        </div>${bar(c.pct, C.indigo)}
-      </div>`).join('')
-    : `<p style="font-size:13px;color:${C.text3};margin:0;">No spending ${period} — nice. 🌱</p>`;
+// ── Templates (user's designs, parameterized) ────────────────────────────────
+const HEAD = `<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="x-apple-disable-message-reformatting"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark light">
+  <title>Finni</title>
+  <!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+  <style>
+    body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}
+    table,td{mso-table-lspace:0pt;mso-table-rspace:0pt;}
+    body{margin:0;padding:0;width:100%!important;background-color:#0b0e17;}
+    a{color:#9d8cff;}
+    @media only screen and (max-width:600px){.container{width:100%!important;}.px{padding-left:24px!important;padding-right:24px!important;}.bignum{font-size:40px!important;}}
+  </style>
+</head>`;
 
-  // Daily-only "game plan" to-dos.
-  const todoHtml = (freq === 'daily' && a.todos.length)
-    ? `<h2 style="font-size:12px;color:${C.text3};text-transform:uppercase;letter-spacing:1.5px;margin:24px 0 12px;">Today's game plan</h2>
-       ${a.todos.map((td) => {
-         const dot = td.status === 'over' ? C.rose : td.status === 'tight' ? C.amber : C.green;
-         return `<div style="display:flex;align-items:flex-start;gap:10px;background:${C.card2};border:1px solid ${C.line};border-radius:10px;padding:11px 14px;margin-bottom:8px;">
-           <span style="width:7px;height:7px;border-radius:4px;background:${dot};margin-top:6px;flex-shrink:0;"></span>
-           <div><span style="font-size:13px;font-weight:700;color:${C.text};">${td.emoji} ${td.name}</span>
-           <span style="font-size:13px;color:${C.text2};"> — ${td.line}</span></div>
-         </div>`;
-       }).join('')}`
-    : '';
-
-  const paceColor = a.onTrack ? C.green : C.rose;
-  const paceText = a.onTrack ? 'On track' : 'Over pace';
-
-  return `<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:${C.bg};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-  <div style="max-width:480px;margin:0 auto;padding:28px 18px;">
-
-    <div style="margin-bottom:22px;">
-      <span style="font-size:20px;font-weight:800;color:${C.text};letter-spacing:-0.4px;">finni</span>
-      <span style="float:right;font-size:12px;color:${C.text3};padding-top:6px;">${Period}'s summary</span>
-    </div>
-
-    <p style="font-size:16px;color:${C.text};margin:0 0 4px;font-weight:600;">Hey ${name} 👋</p>
-    <p style="font-size:14px;color:${C.text2};margin:0 0 22px;line-height:1.55;">${warmLine}</p>
-
-    <!-- Hero: spent / income + pace -->
-    <div style="background:${C.card};border-radius:16px;padding:20px;margin-bottom:18px;border:1px solid ${C.line};">
-      <table width="100%" cellpadding="0" cellspacing="0"><tr>
-        <td><p style="margin:0 0 3px;font-size:11px;color:${C.text3};text-transform:uppercase;letter-spacing:1px;">Spent ${period}</p>
-          <p style="margin:0;font-size:23px;font-weight:800;color:${C.rose};">${formatCurrency(currency, a.totalSpent)}</p></td>
-        <td style="text-align:right;"><p style="margin:0 0 3px;font-size:11px;color:${C.text3};text-transform:uppercase;letter-spacing:1px;">Income</p>
-          <p style="margin:0;font-size:23px;font-weight:800;color:${C.green};">${formatCurrency(currency, a.totalIncome)}</p></td>
-      </tr></table>
-      <div style="margin-top:16px;">
-        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px;">
-          <span style="color:${C.text2};">Monthly budget · ${a.monthUsedPct}% used</span>
-          <span style="color:${paceColor};font-weight:700;">${paceText}</span>
-        </div>${bar(a.monthUsedPct, paceColor)}
-      </div>
-    </div>
-
-    <!-- Where it went -->
-    <h2 style="font-size:12px;color:${C.text3};text-transform:uppercase;letter-spacing:1.5px;margin:0 0 12px;">Where it went</h2>
-    <div style="background:${C.card};border-radius:16px;padding:18px 20px 8px;margin-bottom:6px;border:1px solid ${C.line};">${topHtml}</div>
-
-    ${todoHtml}
-
-    <div style="text-align:center;margin-top:26px;">
-      <a href="finni-app://home" style="display:inline-block;background:${C.indigo};color:#fff;text-decoration:none;padding:13px 30px;border-radius:12px;font-size:15px;font-weight:700;">Open Finni</a>
-    </div>
-
-    <p style="text-align:center;font-size:11px;color:${C.text3};margin-top:24px;line-height:1.7;">
-      ${freq === 'daily' ? 'Daily' : 'Weekly'} insights from Finni · change anytime in Settings → Notifications
-    </p>
-  </div>
+function shell(periodLabel: string, heroLabel: string, spentVar: string, greetingVar: string, body: string): string {
+  return `${HEAD}
+<body style="margin:0;padding:0;background-color:#0b0e17;">
+  <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#0b0e17;">${greetingVar}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#0b0e17;"><tr><td align="center" style="padding:40px 12px;">
+    <table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;">
+      <tr><td class="px" style="padding:0 40px 36px 40px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td align="left" style="font-family:Helvetica,Arial,sans-serif;font-size:21px;font-weight:800;letter-spacing:-0.5px;color:#ffffff;">finni</td>
+        <td align="right" style="font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#6b7288;">${periodLabel}</td>
+      </tr></table></td></tr>
+      <tr><td class="px" style="padding:0 40px 4px 40px;"><p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:18px;font-weight:600;color:#ffffff;">Hey {{firstName}} <span style="font-weight:400;">&#128075;</span></p></td></tr>
+      <tr><td class="px" style="padding:0 40px 34px 40px;"><p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:#9aa1b4;">${greetingVar}</p></td></tr>
+      <tr><td class="px" style="padding:0 40px 0 40px;">
+        <p style="margin:0 0 4px 0;font-family:Helvetica,Arial,sans-serif;font-size:12px;font-weight:600;letter-spacing:1.4px;text-transform:uppercase;color:#6b7288;">${heroLabel}</p>
+        <p class="bignum" style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:46px;font-weight:800;letter-spacing:-1px;color:#ffffff;">{{currency}}${spentVar}</p>
+      </td></tr>
+      <tr><td class="px" style="padding:14px 40px 0 40px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#1b2030;border-radius:99px;"><tr><td style="font-size:0;line-height:0;border-radius:99px;">
+        <table role="presentation" width="{{budgetBarWidth}}%" cellpadding="0" cellspacing="0" border="0" style="background-color:{{paceColor}};border-radius:99px;"><tr><td style="height:4px;font-size:0;line-height:0;">&nbsp;</td></tr></table>
+      </td></tr></table></td></tr>
+      <tr><td class="px" style="padding:10px 40px 36px 40px;"><p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#6b7288;">{{budgetUsedPct}}% of monthly budget &middot; <span style="color:{{paceColor}};font-weight:600;">{{paceLabel}}</span></p></td></tr>
+      <tr><td class="px" style="padding:0 40px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="border-top:1px solid #1b2030;font-size:0;line-height:0;">&nbsp;</td></tr></table></td></tr>
+      <tr><td class="px" style="padding:30px 40px 16px 40px;"><p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:12px;font-weight:600;letter-spacing:1.4px;text-transform:uppercase;color:#6b7288;">Where it went</p></td></tr>
+      <tr><td class="px" style="padding:0 40px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">{{categoryRows}}</table></td></tr>
+      {{gamePlan}}
+      <tr><td class="px" style="padding:30px 40px 0 40px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="border-top:1px solid #1b2030;font-size:0;line-height:0;">&nbsp;</td></tr></table></td></tr>
+      <tr><td class="px" style="padding:30px 40px 6px 40px;"><p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:12px;font-weight:600;letter-spacing:1.4px;text-transform:uppercase;color:#9d8cff;">&#10024;&nbsp; Finni coach</p></td></tr>
+      ${body}
+      <tr><td align="center" style="padding:0 40px 40px 40px;">
+        <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{appUrl}}" style="height:50px;v-text-anchor:middle;width:200px;" arcsize="50%" fillcolor="#7c6cf5" strokecolor="#7c6cf5"><w:anchorlock/><center style="color:#ffffff;font-family:Helvetica,Arial,sans-serif;font-size:16px;font-weight:700;">Open Finni</center></v:roundrect><![endif]-->
+        <!--[if !mso]><!-- --><a href="{{appUrl}}" style="display:inline-block;background-color:#7c6cf5;color:#ffffff;font-family:Helvetica,Arial,sans-serif;font-size:16px;font-weight:700;text-decoration:none;padding:15px 46px;border-radius:99px;">Open Finni</a><!--<![endif]-->
+      </td></tr>
+      <tr><td class="px" style="padding:0 40px;" align="center"><p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:#4f566a;">{{periodWord}} insights from Finni &middot; <a href="{{appUrl}}/settings" style="color:#6b7288;text-decoration:underline;">manage notifications</a></p></td></tr>
+    </table>
+  </td></tr></table>
 </body></html>`;
+}
+
+const DAILY_BODY = `<tr><td class="px" style="padding:0 40px 38px 40px;"><p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#e6e8f0;">{{aiInsight}}</p></td></tr>`;
+const WEEKLY_BODY = `<tr><td class="px" style="padding:0 40px 16px 40px;"><p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#e6e8f0;">{{aiInsight}}</p></td></tr>
+      <tr><td class="px" style="padding:0 40px 38px 40px;"><p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#9aa1b4;"><span style="color:#9d8cff;font-weight:600;">Next week &mdash;</span> {{aiFocus}}</p></td></tr>`;
+
+export function renderEmail(
+  freq: Freq, name: string, code: string, a: EmailAnalytics, ai: AiFields, appUrl: string,
+): string {
+  const sym = symbolOf(code);
+  const paceColor = a.onTrack ? '#34d399' : '#ff5e7e';
+  const paceLabel = a.onTrack ? 'On track' : 'Over pace';
+  const barWidth = Math.min(100, Math.max(3, a.monthUsedPct));
+
+  const tpl = freq === 'daily'
+    ? shell('Today', 'Spent today', '{{spent}}', '{{aiGreeting}}', DAILY_BODY)
+    : shell('This week', 'Spent this week', '{{spent}}', '{{aiGreeting}}', WEEKLY_BODY);
+
+  const vars: Record<string, string> = {
+    firstName: name,
+    currency: sym,
+    spent: formatAmount(a.totalSpent),
+    budgetBarWidth: String(barWidth),
+    paceColor,
+    budgetUsedPct: String(a.monthUsedPct),
+    paceLabel,
+    categoryRows: categoryRows(a.topCategories, sym),
+    gamePlan: freq === 'daily' ? gamePlanSection(a.todos) : '',
+    aiGreeting: ai.greeting,
+    aiInsight: ai.insight,
+    aiFocus: ai.focus ?? '',
+    appUrl,
+    periodWord: freq === 'daily' ? 'Daily' : 'Weekly',
+  };
+  let html = tpl;
+  for (const [k, v] of Object.entries(vars)) html = html.split(`{{${k}}}`).join(v);
+  return html;
 }
