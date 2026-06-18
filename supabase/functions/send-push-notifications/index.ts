@@ -118,22 +118,44 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    // 4. Budget alert (active users — check if any category is ≥ 80% spent)
+    // 4. Budget alert (active users — any category ≥ 80% spent this month).
+    // NOTE: categories.spent is not maintained app-side, so compute month-to-date
+    // spend from transactions directly (mirrors the email function).
     const { data: cats } = await supabase
       .from('categories')
-      .select('name, budget, spent')
+      .select('id, name, budget')
       .eq('user_id', user.id)
       .gt('budget', 0);
 
-    const nearLimit = (cats ?? []).find(c => Number(c.budget) > 0 && Number(c.spent) / Number(c.budget) >= 0.8);
-    if (nearLimit) {
-      const pct = Math.round((Number(nearLimit.spent) / Number(nearLimit.budget)) * 100);
-      messages.push({
-        to: token,
-        title: `⚠️ ${nearLimit.name} budget at ${pct}%`,
-        body: `You've used ${pct}% of your ${nearLimit.name} budget this month. Tap to review.`,
-        sound: 'default',
-      });
+    if (cats?.length) {
+      const { data: txns } = await supabase
+        .from('transactions')
+        .select('category_id, withdrawal')
+        .eq('user_id', user.id)
+        .eq('type', 'expense')
+        .gte('date', monthStart());
+
+      const spentByCat = new Map<string, number>();
+      for (const t of txns ?? []) {
+        const k = t.category_id as string | null;
+        if (k) spentByCat.set(k, (spentByCat.get(k) ?? 0) + (Number(t.withdrawal) || 0));
+      }
+
+      // Surface the single most over-threshold category.
+      let alert: { name: string; pct: number } | null = null;
+      for (const c of cats) {
+        const spent = spentByCat.get(c.id as string) ?? 0;
+        const pct = Number(c.budget) > 0 ? (spent / Number(c.budget)) * 100 : 0;
+        if (pct >= 80 && (!alert || pct > alert.pct)) alert = { name: c.name as string, pct: Math.round(pct) };
+      }
+      if (alert) {
+        messages.push({
+          to: token,
+          title: `⚠️ ${alert.name} budget at ${alert.pct}%`,
+          body: `You've used ${alert.pct}% of your ${alert.name} budget this month. Tap to review.`,
+          sound: 'default',
+        });
+      }
     }
   }
 
