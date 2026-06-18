@@ -169,8 +169,8 @@ Two layers:
 
 ---
 
-## 11. Open decisions (need your input to start)
-1. **Inbound provider** — where's `heyfinni.com` DNS? (Cloudflare → Email Routing; else → SendGrid Inbound Parse). *Gates everything.*
-2. **Alias subdomain** — `in.heyfinni.com`? (or your preference)
-3. **Review surface** — dedicated 6th tab (your ask) vs Home-header inbox icon, if 6 tabs feels crowded.
-4. **v1 auto-approve?** Recommend always-review in v1.
+## 11. Decisions (locked 2026-06-17)
+1. ✅ **Inbound provider: SendGrid Inbound Parse** (DNS is not on Cloudflare). Free; POSTs the `{from,to,subject,text,html}` webhook the function already expects.
+2. **Alias subdomain** — proposed `in.heyfinni.com` (confirm, or pick another).
+3. ✅ **Review surface: inbox icon + badge in the Home header** (keeps 5 tabs).
+4. ✅ **v1: always-review** (no silent auto-logging); auto-approve high-confidence is P2.
