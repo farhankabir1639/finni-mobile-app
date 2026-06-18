@@ -23,6 +23,7 @@ import IncomeModal from './settings/IncomeModal';
 import GoalsModal from './settings/GoalsModal';
 import NotificationsModal from './settings/NotificationsModal';
 import RecurringModal from './settings/RecurringModal';
+import AutoImportModal from './settings/AutoImportModal';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -74,6 +75,7 @@ export default function SettingsScreen() {
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [notificationsVisible, setNotificationsVisible] = useState(false);
   const [recurringModalVisible, setRecurringModalVisible] = useState(false);
+  const [autoImportVisible, setAutoImportVisible] = useState(false);
 
   const handleSignOut = () => {
     Alert.alert(
@@ -204,6 +206,7 @@ export default function SettingsScreen() {
           <SettingsRow label="Categories" icon="🏷️" color={t.catShopping} onPress={() => setCategoriesModalVisible(true)} />
           <SettingsRow label="Goals" icon="🎯" color={t.cyan} onPress={() => setGoalsModalVisible(true)} />
           <SettingsRow label="Recurring" icon="🔁" color={t.auraIndigo} onPress={() => setRecurringModalVisible(true)} />
+          <SettingsRow label="Auto-import" icon="📥" color={t.auraAqua} onPress={() => setAutoImportVisible(true)} />
         </View>
 
         {/* Notifications */}
@@ -271,6 +274,10 @@ export default function SettingsScreen() {
 
       <Modal visible={recurringModalVisible} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setRecurringModalVisible(false)}>
         <RecurringModal userId={user?.id ?? ''} onClose={() => setRecurringModalVisible(false)} />
+      </Modal>
+
+      <Modal visible={autoImportVisible} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setAutoImportVisible(false)}>
+        <AutoImportModal userId={user?.id ?? ''} onClose={() => setAutoImportVisible(false)} />
       </Modal>
 
       <Modal visible={editProfileVisible} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setEditProfileVisible(false)}>

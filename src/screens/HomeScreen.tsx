@@ -19,6 +19,7 @@ import { chatAgent, transcribeAudio } from '../lib/agents';
 import type { ParsedTransaction, CategoryProposal } from '../lib/agents';
 import { addPendingProposals, resolvePendingProposals } from '../lib/categoryProposals';
 import { materializeDueRecurring } from '../lib/recurring';
+import { getPendingCount } from '../lib/emailCapture';
 import { seedDefaultCategories } from '../lib/seedCategories';
 import { captureError } from '../lib/sentry';
 import { trackEvent, trackScreen } from '../lib/analytics';
@@ -33,6 +34,7 @@ import GlassCard from '../components/GlassCard';
 import TransactionCard from '../components/TransactionCard';
 import CategoryProposalCard from '../components/CategoryProposalCard';
 import FinniInsightCard from '../components/FinniInsightCard';
+import ReviewModal from '../components/ReviewModal';
 import type { InsightContext } from '../lib/insights';
 import { t, fonts } from '../theme/tokens';
 
@@ -68,6 +70,12 @@ const QUICK_CHIPS = [
 ];
 
 // ── SVG Icons ─────────────────────────────────────────────────────────────────
+const InboxIcon = ({ color = t.text2 }: { color?: string }) => (
+  <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+    <Path d="M22 12h-6l-2 3h-4l-2-3H2" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <Path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
 const ClockIcon = ({ color = t.text2 }: { color?: string }) => (
   <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
     <SvgCircle cx="12" cy="12" r="9" stroke={color} strokeWidth="1.8" />
@@ -170,6 +178,8 @@ export default function HomeScreen() {
   const [activeSessionDate, setActiveSessionDate] = useState<string | null>(null);
   const [isRecording, setIsRecording]           = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [reviewVisible, setReviewVisible]       = useState(false);
+  const [pendingCount, setPendingCount]         = useState(0);
 
   const scrollRef         = useRef<ScrollView>(null);
   const welcomeAddedRef   = useRef(false);
@@ -385,6 +395,7 @@ export default function HomeScreen() {
 
   useFocusEffect(React.useCallback(() => {
     fetchChatContext();
+    if (user?.id) getPendingCount(user.id).then(setPendingCount);
     // Leaving the chat tab = session end: auto-create any category proposals the
     // user never responded to, then their transactions get re-tagged.
     return () => { if (user?.id) resolvePendingProposals(user.id); };
@@ -615,9 +626,19 @@ export default function HomeScreen() {
                 <Text style={[styles.greetingText, { fontFamily: fonts.bold }]}>{greeting}</Text>
                 <Text style={[styles.dateText, { fontFamily: fonts.regular }]}>{formatDate(today)}</Text>
               </View>
-              <Pressable style={styles.historyBtn} onPress={openHistory} hitSlop={12}>
-                <ClockIcon />
-              </Pressable>
+              <View style={styles.headerActions}>
+                <Pressable style={styles.historyBtn} onPress={() => setReviewVisible(true)} hitSlop={12}>
+                  <InboxIcon />
+                  {pendingCount > 0 ? (
+                    <View style={styles.inboxBadge}>
+                      <Text style={styles.inboxBadgeTxt}>{pendingCount > 9 ? '9+' : pendingCount}</Text>
+                    </View>
+                  ) : null}
+                </Pressable>
+                <Pressable style={styles.historyBtn} onPress={openHistory} hitSlop={12}>
+                  <ClockIcon />
+                </Pressable>
+              </View>
             </View>
 
 
@@ -818,6 +839,16 @@ export default function HomeScreen() {
         </KeyboardAvoidingView>
       </SafeAreaView>
 
+      {/* Review (auto-captured transactions) */}
+      <ReviewModal
+        visible={reviewVisible}
+        userId={user?.id ?? ''}
+        categories={(chatContext.categories ?? []) as { id: string; name: string; emoji?: string }[]}
+        currencySymbol={currencySymbol}
+        onClose={() => setReviewVisible(false)}
+        onChanged={() => { if (user?.id) getPendingCount(user.id).then(setPendingCount); }}
+      />
+
       {/* History Modal */}
       <Modal visible={showHistory} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowHistory(false)}>
         <SafeAreaView style={styles.historyModal} edges={['top', 'bottom']}>
@@ -862,6 +893,9 @@ const styles = StyleSheet.create({
   greetingText: { fontSize: 22, color: t.text, letterSpacing: -0.3 },
   dateText: { fontSize: 13, color: t.text3, marginTop: 2 },
   historyBtn: { padding: 6 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  inboxBadge: { position: 'absolute', top: 0, right: 0, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: t.auraIndigo, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  inboxBadgeTxt: { fontSize: 10, fontFamily: fonts.bold, color: '#fff' },
 
   arcSection: { alignItems: 'center', gap: 10, marginBottom: 12 },
 
