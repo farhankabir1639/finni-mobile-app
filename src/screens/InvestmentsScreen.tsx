@@ -42,7 +42,7 @@ const ASSET_COLORS: Record<string, string> = {
   gold: '#FBBF24',
   bond: t.auraAqua,
   real_estate: '#34D399',
-  other: t.text3,
+  other: t.auraAqua,
 };
 
 const ASSET_LABELS: Record<string, string> = {

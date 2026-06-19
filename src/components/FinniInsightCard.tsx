@@ -3,6 +3,10 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import GlassCard from './GlassCard';
 import { t, fonts } from '../theme/tokens';
 import { getTopInsight, recordFeedback, dismissInsight, type InsightContext, type GeneratedInsight } from '../lib/insights';
+import { trackEvent } from '../lib/analytics';
+
+// Why a 👎 — feeds tonality tuning, not hard-coded numbers.
+const DOWN_REASONS = ['Wrong number', 'Not relevant', 'Already knew', 'Too vague'] as const;
 
 interface Props {
   ctx: InsightContext | null;
@@ -17,6 +21,7 @@ interface Props {
 export default function FinniInsightCard({ ctx, fallbackText, onOpen }: Props) {
   const [insight, setInsight] = useState<GeneratedInsight | null>(null);
   const [voted, setVoted] = useState(false);
+  const [askReason, setAskReason] = useState(false);
   // Re-run only when the underlying numbers change, not on every render.
   const sig = ctx ? `${ctx.userId}|${ctx.monthSpent}|${ctx.categories.length}|${ctx.goals.length}` : '';
   const lastSig = useRef('');
@@ -26,7 +31,7 @@ export default function FinniInsightCard({ ctx, fallbackText, onOpen }: Props) {
     lastSig.current = sig;
     let alive = true;
     getTopInsight(ctx)
-      .then((res) => { if (alive) { setInsight(res); setVoted(false); } })
+      .then((res) => { if (alive) { setInsight(res); setVoted(false); setAskReason(false); } })
       .catch(() => { /* card just falls back */ });
     return () => { alive = false; };
   }, [sig, ctx]);
@@ -34,10 +39,19 @@ export default function FinniInsightCard({ ctx, fallbackText, onOpen }: Props) {
   const onUp = () => {
     if (!ctx?.userId || !insight) return;
     recordFeedback(ctx.userId, insight.category, 'up');
+    trackEvent('insight_feedback', { category: insight.category, vote: 'up' });
     setVoted(true);
   };
+  // 👎 first reveals reason chips; we record the down-vote up front so the
+  // personalizer reacts even if the user skips picking a reason.
   const onDown = () => {
     if (!ctx?.userId || !insight) return;
+    recordFeedback(ctx.userId, insight.category, 'down');
+    setAskReason(true);
+  };
+  const onReason = (reason: string) => {
+    if (!ctx?.userId || !insight) return;
+    trackEvent('insight_feedback', { category: insight.category, vote: 'down', reason });
     dismissInsight(ctx.userId, insight.category);
     setInsight(null);
   };
@@ -72,21 +86,32 @@ export default function FinniInsightCard({ ctx, fallbackText, onOpen }: Props) {
           ) : null}
         </TouchableOpacity>
 
-        <View style={s.feedbackRow}>
-          {voted ? (
+        {voted ? (
+          <View style={s.feedbackRow}>
             <Text style={[s.thanks, { fontFamily: fonts.medium }]}>Thanks — I'll tune these for you 💜</Text>
-          ) : (
-            <>
-              <Text style={[s.helpful, { fontFamily: fonts.regular }]}>Helpful?</Text>
-              <TouchableOpacity onPress={onUp} hitSlop={10} style={s.voteBtn} activeOpacity={0.7}>
-                <Text style={s.voteEmoji}>👍</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={onDown} hitSlop={10} style={s.voteBtn} activeOpacity={0.7}>
-                <Text style={s.voteEmoji}>👎</Text>
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
+          </View>
+        ) : askReason ? (
+          <View style={s.reasonWrap}>
+            <Text style={[s.helpful, { fontFamily: fonts.regular }]}>What was off?</Text>
+            <View style={s.chips}>
+              {DOWN_REASONS.map((r) => (
+                <TouchableOpacity key={r} onPress={() => onReason(r)} style={s.chip} activeOpacity={0.7}>
+                  <Text style={[s.chipText, { fontFamily: fonts.medium }]}>{r}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        ) : (
+          <View style={s.feedbackRow}>
+            <Text style={[s.helpful, { fontFamily: fonts.regular }]}>Helpful?</Text>
+            <TouchableOpacity onPress={onUp} hitSlop={10} style={s.voteBtn} activeOpacity={0.7}>
+              <Text style={s.voteEmoji}>👍</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onDown} hitSlop={10} style={s.voteBtn} activeOpacity={0.7}>
+              <Text style={s.voteEmoji}>👎</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </GlassCard>
     </View>
   );
@@ -105,4 +130,15 @@ const s = StyleSheet.create({
   voteBtn: { paddingVertical: 2, paddingHorizontal: 2 },
   voteEmoji: { fontSize: 16 },
   thanks: { fontSize: 12, color: t.text3 },
+  reasonWrap: { marginTop: 12, gap: 8 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  chip: {
+    paddingVertical: 6,
+    paddingHorizontal: 11,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: t.glassLine,
+  },
+  chipText: { fontSize: 12, color: t.text2 },
 });

@@ -202,6 +202,12 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
           </View>
         </View>
 
+        {/* trust */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'center', gap: 7, marginTop: 22, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: t.glassLine }}>
+          <Text style={{ fontSize: 12 }}>🔒</Text>
+          <Text style={[styles.legalLink, { fontFamily: fonts.medium, color: t.text3 }]}>Bank-level encryption · Your data is never sold</Text>
+        </View>
+
         {/* legal */}
         <View style={styles.legalRow}>
           <TouchableOpacity onPress={() => Linking.openURL(PRIVACY_URL)}>

@@ -23,8 +23,64 @@ import { fmtShort } from '../components/DateRangePicker';
 import Aurora from '../components/Aurora';
 import Orb from '../components/Orb';
 import GlassCard from '../components/GlassCard';
+import Svg, { Path, Circle, Line } from 'react-native-svg';
 
 const { width: SW, height: SH } = Dimensions.get('window');
+
+// Thin-line vector icons for goal tiles (replaces emoji — matches design system)
+function GoalIcon({ type, color }: { type: GoalCard['type']; color: string }) {
+  const p = { stroke: color, strokeWidth: 1.7, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, fill: 'none' };
+  switch (type) {
+    case 'saving': // stacked coins
+      return (
+        <Svg width={22} height={22} viewBox="0 0 24 24">
+          <Path d="M5 7c0-1.66 3.13-3 7-3s7 1.34 7 3-3.13 3-7 3-7-1.34-7-3Z" {...p} />
+          <Path d="M5 7v5c0 1.66 3.13 3 7 3s7-1.34 7-3V7" {...p} />
+          <Path d="M5 12v5c0 1.66 3.13 3 7 3s7-1.34 7-3v-5" {...p} />
+        </Svg>
+      );
+    case 'home': // house
+      return (
+        <Svg width={22} height={22} viewBox="0 0 24 24">
+          <Path d="M4 11.5 12 4l8 7.5" {...p} />
+          <Path d="M6 10v9h12v-9" {...p} />
+          <Path d="M10 19v-5h4v5" {...p} />
+        </Svg>
+      );
+    case 'education': // graduation cap
+      return (
+        <Svg width={22} height={22} viewBox="0 0 24 24">
+          <Path d="M12 5 2 9l10 4 10-4-10-4Z" {...p} />
+          <Path d="M6 11v4c0 1.1 2.7 2 6 2s6-.9 6-2v-4" {...p} />
+          <Line x1={22} y1={9} x2={22} y2={13.5} {...p} />
+        </Svg>
+      );
+    case 'travel': // globe
+      return (
+        <Svg width={22} height={22} viewBox="0 0 24 24">
+          <Circle cx={12} cy={12} r={8} {...p} />
+          <Line x1={4} y1={12} x2={20} y2={12} {...p} />
+          <Path d="M12 4c2.5 2.2 2.5 13.8 0 16M12 4c-2.5 2.2-2.5 13.8 0 16" {...p} />
+        </Svg>
+      );
+    case 'debt_payment': // card
+      return (
+        <Svg width={22} height={22} viewBox="0 0 24 24">
+          <Path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" {...p} />
+          <Line x1={3} y1={10} x2={21} y2={10} {...p} />
+          <Line x1={7} y1={15} x2={11} y2={15} {...p} />
+        </Svg>
+      );
+    default: // custom — target
+      return (
+        <Svg width={22} height={22} viewBox="0 0 24 24">
+          <Circle cx={12} cy={12} r={8} {...p} />
+          <Circle cx={12} cy={12} r={4} {...p} />
+          <Circle cx={12} cy={12} r={0.6} {...p} />
+        </Svg>
+      );
+  }
+}
 
 const GOAL_CARDS = [
   { type: 'saving', label: 'Save money', emoji: '💰', color: t.auraAqua },
@@ -343,7 +399,7 @@ export default function OnboardingScreen() {
                           activeOpacity={0.8}
                         >
                           <View style={[s.goalIconBox, { backgroundColor: card.color + '2E', borderColor: card.color + '4D' }]}>
-                            <Text style={{ fontSize: 22 }}>{card.emoji}</Text>
+                            <GoalIcon type={card.type} color={card.color} />
                           </View>
                           <Text style={[s.goalLabel, active && { color: '#fff' }]}>{card.label}</Text>
                         </TouchableOpacity>

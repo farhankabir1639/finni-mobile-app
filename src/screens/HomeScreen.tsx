@@ -196,6 +196,12 @@ export default function HomeScreen() {
   const monthElapsedPct = Math.round((today.getDate() / daysInMonth(today)) * 100);
   const monthName       = today.toLocaleString('en-US', { month: 'long' });
   const onTrack         = monthUsedPct <= monthElapsedPct;
+  const paceDelta       = monthUsedPct - monthElapsedPct; // <0 = ahead of pace (good)
+  const paceLabel       = monthlyBudget <= 0
+    ? (onTrack ? 'On track' : 'Over pace')
+    : Math.abs(paceDelta) <= 1 ? 'Right on pace'
+    : paceDelta < 0 ? `${Math.abs(paceDelta)}% under pace`
+    : `${paceDelta}% over pace`;
   const greeting        = firstName ? `${getGreetingBase()}, ${firstName}` : getGreetingBase();
 
   const finnisNoticed = useMemo(() => {
@@ -705,7 +711,7 @@ export default function HomeScreen() {
                 <View style={[styles.pacePill, onTrack ? styles.pacePillGreen : styles.pacePillRed]}>
                   <View style={[styles.paceDot, { backgroundColor: onTrack ? t.green : t.red }]} />
                   <Text allowFontScaling={false} style={[styles.paceText, { fontFamily: fonts.semiBold, color: onTrack ? t.green : t.red }]}>
-                    {onTrack ? 'On track' : 'Over pace'}
+                    {paceLabel}
                   </Text>
                 </View>
               </View>
