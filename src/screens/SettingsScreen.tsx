@@ -12,6 +12,8 @@ const DATA_DELETION_URL = 'https://www.heyfinni.com/data-deletion';
 const SUPPORT_EMAIL = 'support@heyfinni.com';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfile } from '../contexts/ProfileContext';
+import { useEntitlement } from '../lib/entitlements';
+import { exportTransactionsCSV, exportMonthlyReportPDF } from '../lib/exportData';
 import { t, fonts } from '../theme/tokens';
 import { styles } from './settings/settingsStyles';
 import Aurora from '../components/Aurora';
@@ -67,7 +69,9 @@ function SettingsRow({ label, icon, color, danger, onPress, loading }: RowProps)
 
 export default function SettingsScreen() {
   const { user, signOut } = useAuth();
-  const { profile, refreshProfile } = useProfile();
+  const { profile, refreshProfile, currencySymbol } = useProfile();
+  const { isPro } = useEntitlement();
+  const [exporting, setExporting] = useState<null | 'csv' | 'pdf'>(null);
   const [categoriesModalVisible, setCategoriesModalVisible] = useState(false);
   const [goalsModalVisible, setGoalsModalVisible] = useState(false);
   const [editProfileVisible, setEditProfileVisible] = useState(false);
@@ -81,6 +85,24 @@ export default function SettingsScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const canGoBack = typeof navigation.canGoBack === 'function' ? navigation.canGoBack() : false;
+
+  const runExport = async (kind: 'csv' | 'pdf') => {
+    if (!isPro) { navigation.navigate('Paywall', { feature: 'export' }); return; }
+    if (!user?.id) return;
+    setExporting(kind);
+    try {
+      const res = kind === 'csv'
+        ? await exportTransactionsCSV(user.id)
+        : await exportMonthlyReportPDF(user.id, currencySymbol);
+      if (res.empty) {
+        Alert.alert('Nothing to export', kind === 'pdf' ? 'No transactions this month yet.' : 'Log a few transactions first.');
+      }
+    } catch {
+      Alert.alert('Export failed', 'Something went wrong creating the file. Please try again.');
+    } finally {
+      setExporting(null);
+    }
+  };
 
   // Opened from the NavShelf focused on a section → auto-open that modal.
   useEffect(() => {
@@ -214,6 +236,17 @@ export default function SettingsScreen() {
           <Text style={styles.profileEmail}>{email}</Text>
         </GlassCard>
 
+        {/* Finni Pro */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Plan</Text>
+          <SettingsRow
+            label={isPro ? 'Finni Pro · Active' : 'Upgrade to Finni Pro'}
+            icon={isPro ? '⭐' : '✨'}
+            color={t.auraAqua}
+            onPress={() => navigation.navigate('Paywall')}
+          />
+        </View>
+
         {/* My Account */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>My Account</Text>
@@ -231,6 +264,25 @@ export default function SettingsScreen() {
           {EMAIL_CAPTURE_ENABLED && (
             <SettingsRow label="Auto-import" icon="📥" color={t.auraAqua} onPress={() => setAutoImportVisible(true)} />
           )}
+        </View>
+
+        {/* Export */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Export {isPro ? '' : '· Pro'}</Text>
+          <SettingsRow
+            label="Export transactions (CSV)"
+            icon="📄"
+            color={t.auraBlue}
+            loading={exporting === 'csv'}
+            onPress={() => runExport('csv')}
+          />
+          <SettingsRow
+            label="Monthly report (PDF)"
+            icon="📊"
+            color={t.auraViolet}
+            loading={exporting === 'pdf'}
+            onPress={() => runExport('pdf')}
+          />
         </View>
 
         {/* Notifications */}
