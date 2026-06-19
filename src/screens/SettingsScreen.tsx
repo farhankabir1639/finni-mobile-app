@@ -24,6 +24,7 @@ import GoalsModal from './settings/GoalsModal';
 import NotificationsModal from './settings/NotificationsModal';
 import RecurringModal from './settings/RecurringModal';
 import AutoImportModal from './settings/AutoImportModal';
+import { EMAIL_CAPTURE_ENABLED } from '../lib/featureFlags';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -206,7 +207,9 @@ export default function SettingsScreen() {
           <SettingsRow label="Categories" icon="🏷️" color={t.catShopping} onPress={() => setCategoriesModalVisible(true)} />
           <SettingsRow label="Goals" icon="🎯" color={t.cyan} onPress={() => setGoalsModalVisible(true)} />
           <SettingsRow label="Recurring" icon="🔁" color={t.auraIndigo} onPress={() => setRecurringModalVisible(true)} />
-          <SettingsRow label="Auto-import" icon="📥" color={t.auraAqua} onPress={() => setAutoImportVisible(true)} />
+          {EMAIL_CAPTURE_ENABLED && (
+            <SettingsRow label="Auto-import" icon="📥" color={t.auraAqua} onPress={() => setAutoImportVisible(true)} />
+          )}
         </View>
 
         {/* Notifications */}

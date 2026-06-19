@@ -20,6 +20,7 @@ import type { ParsedTransaction, CategoryProposal } from '../lib/agents';
 import { addPendingProposals, resolvePendingProposals } from '../lib/categoryProposals';
 import { materializeDueRecurring } from '../lib/recurring';
 import { getPendingCount } from '../lib/emailCapture';
+import { EMAIL_CAPTURE_ENABLED } from '../lib/featureFlags';
 import { seedDefaultCategories } from '../lib/seedCategories';
 import { captureError } from '../lib/sentry';
 import { trackEvent, trackScreen } from '../lib/analytics';
@@ -395,7 +396,7 @@ export default function HomeScreen() {
 
   useFocusEffect(React.useCallback(() => {
     fetchChatContext();
-    if (user?.id) getPendingCount(user.id).then(setPendingCount);
+    if (EMAIL_CAPTURE_ENABLED && user?.id) getPendingCount(user.id).then(setPendingCount);
     // Leaving the chat tab = session end: auto-create any category proposals the
     // user never responded to, then their transactions get re-tagged.
     return () => { if (user?.id) resolvePendingProposals(user.id); };
@@ -627,14 +628,16 @@ export default function HomeScreen() {
                 <Text style={[styles.dateText, { fontFamily: fonts.regular }]}>{formatDate(today)}</Text>
               </View>
               <View style={styles.headerActions}>
-                <Pressable style={styles.historyBtn} onPress={() => setReviewVisible(true)} hitSlop={12}>
-                  <InboxIcon />
-                  {pendingCount > 0 ? (
-                    <View style={styles.inboxBadge}>
-                      <Text style={styles.inboxBadgeTxt}>{pendingCount > 9 ? '9+' : pendingCount}</Text>
-                    </View>
-                  ) : null}
-                </Pressable>
+                {EMAIL_CAPTURE_ENABLED ? (
+                  <Pressable style={styles.historyBtn} onPress={() => setReviewVisible(true)} hitSlop={12}>
+                    <InboxIcon />
+                    {pendingCount > 0 ? (
+                      <View style={styles.inboxBadge}>
+                        <Text style={styles.inboxBadgeTxt}>{pendingCount > 9 ? '9+' : pendingCount}</Text>
+                      </View>
+                    ) : null}
+                  </Pressable>
+                ) : null}
                 <Pressable style={styles.historyBtn} onPress={openHistory} hitSlop={12}>
                   <ClockIcon />
                 </Pressable>
@@ -839,15 +842,17 @@ export default function HomeScreen() {
         </KeyboardAvoidingView>
       </SafeAreaView>
 
-      {/* Review (auto-captured transactions) */}
-      <ReviewModal
-        visible={reviewVisible}
-        userId={user?.id ?? ''}
-        categories={(chatContext.categories ?? []) as { id: string; name: string; emoji?: string }[]}
-        currencySymbol={currencySymbol}
-        onClose={() => setReviewVisible(false)}
-        onChanged={() => { if (user?.id) getPendingCount(user.id).then(setPendingCount); }}
-      />
+      {/* Review (auto-captured transactions) — gated until email-capture ships */}
+      {EMAIL_CAPTURE_ENABLED ? (
+        <ReviewModal
+          visible={reviewVisible}
+          userId={user?.id ?? ''}
+          categories={(chatContext.categories ?? []) as { id: string; name: string; emoji?: string }[]}
+          currencySymbol={currencySymbol}
+          onClose={() => setReviewVisible(false)}
+          onChanged={() => { if (user?.id) getPendingCount(user.id).then(setPendingCount); }}
+        />
+      ) : null}
 
       {/* History Modal */}
       <Modal visible={showHistory} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowHistory(false)}>
