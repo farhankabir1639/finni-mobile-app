@@ -1,6 +1,6 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Modal, Linking, Alert, ActivityIndicator, Dimensions } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { trackScreen } from '../lib/analytics';
@@ -77,6 +77,21 @@ export default function SettingsScreen() {
   const [notificationsVisible, setNotificationsVisible] = useState(false);
   const [recurringModalVisible, setRecurringModalVisible] = useState(false);
   const [autoImportVisible, setAutoImportVisible] = useState(false);
+
+  const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const canGoBack = typeof navigation.canGoBack === 'function' ? navigation.canGoBack() : false;
+
+  // Opened from the NavShelf focused on a section → auto-open that modal.
+  useEffect(() => {
+    const open = route.params?.open as string | undefined;
+    if (!open) return;
+    if (open === 'edit') setEditProfileVisible(true);
+    else if (open === 'currency') setCurrencyModalVisible(true);
+    else if (open === 'income') setIncomeModalVisible(true);
+    else if (open === 'categories' || open === 'budget') setCategoriesModalVisible(true);
+    else if (open === 'goals') setGoalsModalVisible(true);
+  }, [route.params?.open]);
 
   const handleSignOut = () => {
     Alert.alert(
@@ -175,8 +190,14 @@ export default function SettingsScreen() {
     <View style={styles.root}>
       <Aurora width={SW} height={SH} />
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
+        <View style={[styles.header, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
           <Text style={styles.headerTitle}>Settings</Text>
+          {canGoBack && (
+            <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={12}
+              style={{ width: 38, height: 38, borderRadius: 999, alignItems: 'center', justifyContent: 'center', backgroundColor: t.glass, borderWidth: 1, borderColor: t.glassLine }}>
+              <Text style={{ fontSize: 17, color: t.text2 }}>✕</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Profile card */}

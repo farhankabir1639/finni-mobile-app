@@ -4,6 +4,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfile } from '../contexts/ProfileContext';
 import MainTabs from './MainTabs';
+import SettingsScreen from '../screens/SettingsScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
 import SignupScreen from '../screens/auth/SignupScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
@@ -49,7 +50,10 @@ export default function AppNavigator() {
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {user ? (
           profile?.onboardingComplete ? (
-            <Stack.Screen name="MainTabs" component={MainTabs} />
+            <>
+              <Stack.Screen name="MainTabs" component={MainTabs} />
+              <Stack.Screen name="Settings" component={SettingsScreen} options={{ presentation: 'modal' }} />
+            </>
           ) : (
             <Stack.Screen name="Onboarding" component={OnboardingScreen} />
           )
