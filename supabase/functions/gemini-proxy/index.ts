@@ -4,6 +4,11 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const ALLOWED_MODELS = ['gemini-2.5-flash'];
+// Master server-side go-live switch for AI metering. Off unless the env var is
+// explicitly 'true' — so deploying this function never caps users before the
+// paywall can actually sell Pro. Flip on (set METERING_ENABLED=true) in sync
+// with the client MONETIZATION_LIVE flag.
+const METERING_ENABLED = Deno.env.get('METERING_ENABLED') === 'true';
 
 Deno.serve(async (req) => {
   // Only accept POST
@@ -64,7 +69,7 @@ Deno.serve(async (req) => {
   // (interactive chat). Runs as the signed-in user, so the RPC's auth.uid()
   // resolves and the per-user counter is race-safe (SELECT ... FOR UPDATE).
   // Free = 50/mo, Pro = 500/mo. On cap → 402 (the client maps it to a paywall).
-  if (body.meter === true) {
+  if (METERING_ENABLED && body.meter === true) {
     const { data: gate, error: gateErr } = await supabase.rpc('consume_ai_action', {
       p_free_limit: 50,
       p_pro_limit: 500,

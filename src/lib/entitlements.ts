@@ -9,6 +9,15 @@
 
 import { useProfile } from '../contexts/ProfileContext';
 
+// ── Master go-live switch ────────────────────────────────────────────────────
+// While false, NOTHING is gated and EVERYONE is treated as Pro — the paywall is
+// still reachable (so pricing is visible) but no feature locks and no one can be
+// stranded behind a paywall that can't complete a purchase yet. Flip to true
+// only once RevenueCat is wired (PURCHASES_ENABLED) AND the entitlement
+// migration is applied in prod. Pairs with the server-side METERING_ENABLED env
+// on the gemini-proxy edge function (keep both in sync).
+export const MONETIZATION_LIVE = false;
+
 export const FREE_AI_LIMIT = 50;   // AI actions / month, free tier
 export const PRO_AI_LIMIT = 500;   // AI actions / month, Pro fair-use
 
@@ -56,7 +65,8 @@ export type Entitlement = {
 export function useEntitlement(): Entitlement {
   const { profile } = useProfile();
   const notExpired = !profile.planExpiresAt || new Date(profile.planExpiresAt).getTime() > Date.now();
-  const isPro = profile.plan === 'pro' && notExpired;
+  // Until monetization is live, treat everyone as Pro so no feature locks.
+  const isPro = !MONETIZATION_LIVE || (profile.plan === 'pro' && notExpired);
   const aiLimit = isPro ? PRO_AI_LIMIT : FREE_AI_LIMIT;
   const aiUsed = profile.aiActionsUsed ?? 0;
   return {
