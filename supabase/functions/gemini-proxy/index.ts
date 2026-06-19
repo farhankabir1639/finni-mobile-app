@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
   }
 
   // Parse request body
-  let body: { contents: unknown; generationConfig?: unknown; model?: string };
+  let body: { contents: unknown; generationConfig?: unknown; model?: string; meter?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -58,6 +58,28 @@ Deno.serve(async (req) => {
       status: 400,
       headers: { 'Content-Type': 'application/json' },
     });
+  }
+
+  // Monthly AI-action metering. Only enforced for explicitly-metered calls
+  // (interactive chat). Runs as the signed-in user, so the RPC's auth.uid()
+  // resolves and the per-user counter is race-safe (SELECT ... FOR UPDATE).
+  // Free = 50/mo, Pro = 500/mo. On cap → 402 (the client maps it to a paywall).
+  if (body.meter === true) {
+    const { data: gate, error: gateErr } = await supabase.rpc('consume_ai_action', {
+      p_free_limit: 50,
+      p_pro_limit: 500,
+    });
+    // Fail-open on metering errors: never block a paying/active user because the
+    // counter hiccuped — we'd rather eat a little cost than break the core flow.
+    if (!gateErr && Array.isArray(gate) && gate.length > 0) {
+      const row = gate[0] as { allowed: boolean; used: number; action_limit: number; plan: string };
+      if (!row.allowed) {
+        return new Response(
+          JSON.stringify({ error: 'cap_reached', used: row.used, action_limit: row.action_limit, plan: row.plan }),
+          { status: 402, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    }
   }
 
   // Resolve model — hardcoded allowlist prevents model substitution

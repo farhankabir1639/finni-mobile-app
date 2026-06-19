@@ -70,6 +70,21 @@ function getYearWeekKey(): string {
 
 const RETRY_DELAYS = [1500, 3000, 5000];
 
+// Thrown when the user hits their monthly AI-action cap (proxy returns 402).
+// The chat UI catches this and surfaces the paywall instead of an error toast.
+export class AiCapError extends Error {
+  used: number;
+  actionLimit: number;
+  plan: string;
+  constructor(used: number, actionLimit: number, plan: string) {
+    super('AI action cap reached');
+    this.name = 'AiCapError';
+    this.used = used;
+    this.actionLimit = actionLimit;
+    this.plan = plan;
+  }
+}
+
 const _insightsInFlight = new Map<string, Promise<DailyInsight[]>>();
 
 async function callGemini(prompt: string, retryCount = 0): Promise<string> {
@@ -79,7 +94,8 @@ async function callGemini(prompt: string, retryCount = 0): Promise<string> {
 async function callGeminiWithHistory(
   contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }>,
   retryCount = 0,
-  genConfig?: Record<string, unknown>
+  genConfig?: Record<string, unknown>,
+  meter = false
 ): Promise<string> {
   if (!GEMINI_PROXY_URL && !GEMINI_DIRECT_URL) throw new Error('Gemini is not configured');
   const controller = new AbortController();
@@ -103,6 +119,10 @@ async function callGeminiWithHistory(
           model: GEMINI_MODEL,
           contents,
           generationConfig: effectiveConfig,
+          // Only metered when explicitly requested (interactive chat). The proxy
+          // counts it against the user's monthly AI-action quota and returns 402
+          // if the cap is hit. Direct-fallback path is unmetered by design.
+          meter: meter && useProxy,
         }),
         signal: controller.signal,
       });
@@ -127,6 +147,16 @@ async function callGeminiWithHistory(
     clearTimeout(timeoutId);
     if (__DEV__) console.log('[Agent1] Gemini response status:', res.status);
 
+    // AI-action cap hit (proxy-only). Surface as a typed error → paywall.
+    if (res.status === 402) {
+      const capBody = await res.json().catch(() => ({} as any));
+      throw new AiCapError(
+        Number((capBody as any)?.used ?? 0),
+        Number((capBody as any)?.action_limit ?? 0),
+        String((capBody as any)?.plan ?? 'free')
+      );
+    }
+
     // If proxy returned infra error, retry via direct
     if (useProxy && isInfraError(res.status) && GEMINI_DIRECT_URL) {
       if (__DEV__) console.log(`[Agent1] Proxy infra error (${res.status}), falling back to direct`);
@@ -147,7 +177,7 @@ async function callGeminiWithHistory(
         const delay = RETRY_DELAYS[retryCount];
         if (__DEV__) console.log(`[Gemini] ${status} error, retrying in ${delay}ms (attempt ${retryCount + 1}/3)`);
         await new Promise((r) => setTimeout(r, delay));
-        return callGeminiWithHistory(contents, retryCount + 1, genConfig);
+        return callGeminiWithHistory(contents, retryCount + 1, genConfig, meter);
       }
       const errBody = await res.json().catch(() => ({}));
       const errMsg = (errBody as any)?.error?.message ?? '';
@@ -166,7 +196,7 @@ async function callGeminiWithHistory(
         const delay = RETRY_DELAYS[retryCount];
         if (__DEV__) console.log(`[Gemini] Empty response, retrying in ${delay}ms (attempt ${retryCount + 1}/2)`);
         await new Promise((r) => setTimeout(r, delay));
-        return callGeminiWithHistory(contents, retryCount + 1, genConfig);
+        return callGeminiWithHistory(contents, retryCount + 1, genConfig, meter);
       }
       throw new Error('Empty Gemini response');
     }
@@ -924,7 +954,9 @@ export async function chatAgent(
   ];
 
   try {
-    const text = await callGeminiWithHistory(contents);
+    // Interactive "Message Finni" — the one user-initiated call we meter
+    // against the monthly AI-action quota (manual logging stays unlimited).
+    const text = await callGeminiWithHistory(contents, 0, undefined, true);
     let { response, txData, txDataArray, newCategory, goalUpdate, goalCreate, categoryBudgetUpdate, investmentData, txParseError } = extractTransactionData(text);
 
     if (txParseError) {
@@ -1437,6 +1469,8 @@ export async function chatAgent(
 
     return { response: finalResponse, transaction: null };
   } catch (e) {
+    // AI-action cap — let the screen surface the paywall instead of a chat reply.
+    if (e instanceof AiCapError) throw e;
     if (__DEV__) console.error('[Agent1] chatAgent Error:', e);
     captureError(e, { context: 'chatAgent', userId });
     const msg = e instanceof Error ? e.message : '';

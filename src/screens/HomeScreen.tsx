@@ -15,7 +15,7 @@ import Svg, { Path, Circle as SvgCircle } from 'react-native-svg';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfile } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
-import { chatAgent, transcribeAudio } from '../lib/agents';
+import { chatAgent, transcribeAudio, AiCapError } from '../lib/agents';
 import type { ParsedTransaction, CategoryProposal } from '../lib/agents';
 import { addPendingProposals, resolvePendingProposals } from '../lib/categoryProposals';
 import { materializeDueRecurring } from '../lib/recurring';
@@ -518,8 +518,17 @@ export default function HomeScreen() {
       if (transaction) { fetchStats(); fetchChatContext(); trackEvent('transaction_logged', { category: transaction.category }); }
       trackEvent('chat_message_sent');
     } catch (e) {
-      captureError(e, { context: 'handleSend', userId: user?.id });
       setIsTyping(false);
+      // Monthly AI-action cap reached → restore the draft, drop the echoed
+      // message, and surface the paywall instead of an error bubble.
+      if (e instanceof AiCapError) {
+        setInputText(trimmed);
+        setMessages(m => m.filter(x => x.id !== userMsg.id));
+        trackEvent('ai_cap_reached', { plan: e.plan, limit: e.actionLimit });
+        (navigation as any).navigate('Paywall');
+        return;
+      }
+      captureError(e, { context: 'handleSend', userId: user?.id });
       setInputText(trimmed);
       setMessages(m => [...m, { id: (Date.now() + 1).toString(), role: 'assistant', content: "I'm having trouble connecting. Please try again 🔄" }]);
     } finally { isSendingRef.current = false; }
@@ -540,7 +549,10 @@ export default function HomeScreen() {
       const updated = [...without, newAi];
       setMessages(updated);
       saveSession(user.id, updated as SessionMessage[], activeSessionDate ?? undefined);
-    } catch (e) { captureError(e, { context: 'handleRegenerate', userId: user.id }); }
+    } catch (e) {
+      if (e instanceof AiCapError) { (navigation as any).navigate('Paywall'); }
+      else captureError(e, { context: 'handleRegenerate', userId: user.id });
+    }
     finally { setIsTyping(false); isSendingRef.current = false; }
   }, [messages, user?.id, chatContext, activeSessionDate]);
 

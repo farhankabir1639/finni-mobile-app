@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useProfile } from '../contexts/ProfileContext';
 import MainTabs from './MainTabs';
 import SettingsScreen from '../screens/SettingsScreen';
+import PaywallScreen from '../screens/PaywallScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
 import SignupScreen from '../screens/auth/SignupScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
@@ -12,6 +13,7 @@ import SplashScreen from '../screens/SplashScreen';
 import UpdatePrompt from '../components/UpdatePrompt';
 import { checkForUpdate, dismissSoftUpdate, type UpdateStatus } from '../lib/updateCheck';
 import { registerForPushNotifications, updateLastActive } from '../lib/notifications';
+import { initPurchases } from '../lib/purchases';
 
 const Stack = createStackNavigator();
 
@@ -30,6 +32,7 @@ export default function AppNavigator() {
     if (!user?.id) return;
     registerForPushNotifications(user.id);
     updateLastActive(user.id);
+    initPurchases(user.id);
   }, [user?.id]);
 
   // Keep last_active_at fresh whenever the app comes to the foreground
@@ -53,6 +56,7 @@ export default function AppNavigator() {
             <>
               <Stack.Screen name="MainTabs" component={MainTabs} />
               <Stack.Screen name="Settings" component={SettingsScreen} options={{ presentation: 'modal' }} />
+              <Stack.Screen name="Paywall" component={PaywallScreen} options={{ presentation: 'modal' }} />
             </>
           ) : (
             <Stack.Screen name="Onboarding" component={OnboardingScreen} />

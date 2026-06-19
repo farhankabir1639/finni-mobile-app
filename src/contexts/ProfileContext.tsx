@@ -28,6 +28,9 @@ type ProfileData = {
   location: string | null;
   monthlyBudget: number;
   onboardingComplete: boolean;
+  plan: 'free' | 'pro';
+  planExpiresAt: string | null;
+  aiActionsUsed: number;
 };
 
 type ProfileContextType = {
@@ -43,6 +46,9 @@ const defaultProfile: ProfileData = {
   location: null,
   monthlyBudget: 0,
   onboardingComplete: false,
+  plan: 'free',
+  planExpiresAt: null,
+  aiActionsUsed: 0,
 };
 
 const ProfileContext = createContext<ProfileContextType>({
@@ -67,12 +73,29 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     try {
-      const { data, error } = await supabase
+      // Try with entitlement columns; if the migration hasn't been applied yet
+      // (PostgREST 42703), fall back to the core columns so existing users are
+      // never wrongly bounced into onboarding.
+      type ProfileRow = {
+        name?: string | null; currency?: string; onboarding_complete?: boolean;
+        plan?: string | null; plan_expires_at?: string | null; ai_actions_used?: number | null;
+      };
+      let row: ProfileRow | null = null;
+      const res = await supabase
         .from('profiles')
-        .select('name, currency, onboarding_complete')
+        .select('name, currency, onboarding_complete, plan, plan_expires_at, ai_actions_used')
         .eq('id', user.id)
         .maybeSingle();
-      const row = data as { name?: string | null; currency?: string; onboarding_complete?: boolean } | null;
+      if (res.error) {
+        const fallback = await supabase
+          .from('profiles')
+          .select('name, currency, onboarding_complete')
+          .eq('id', user.id)
+          .maybeSingle();
+        row = fallback.data as ProfileRow | null;
+      } else {
+        row = res.data as ProfileRow | null;
+      }
       if (row) {
         setProfile({
           name: row.name ?? null,
@@ -80,6 +103,9 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
           location: null,
           monthlyBudget: 0,
           onboardingComplete: row.onboarding_complete ?? true,
+          plan: row.plan === 'pro' ? 'pro' : 'free',
+          planExpiresAt: row.plan_expires_at ?? null,
+          aiActionsUsed: row.ai_actions_used ?? 0,
         });
       } else {
         setProfile({ ...defaultProfile, onboardingComplete: false });
