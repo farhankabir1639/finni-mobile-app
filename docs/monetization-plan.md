@@ -142,6 +142,34 @@ into the paywall. This is the only bypass-proof place to enforce the AI cap.
 
 ---
 
+## 8b. Go-live switches (ship dormant, flip to enable)
+
+Phase 0+1 ships **dormant** so it can't strand users before billing works:
+
+- **`MONETIZATION_LIVE`** (`src/lib/entitlements.ts`, `false`) — while false, everyone
+  is treated as Pro; no feature locks, but the paywall is reachable so **pricing is
+  visible now** (the stated goal). Flip `true` to enforce gates.
+- **`METERING_ENABLED`** (gemini-proxy env var, off) — proxy only counts AI actions
+  when set to `'true'`. Deploying the function never caps users prematurely.
+
+**Go-live checklist (flip both together):** RevenueCat wired (`PURCHASES_ENABLED`) →
+entitlement migration applied in prod → set `METERING_ENABLED=true` on the edge
+function → set `MONETIZATION_LIVE = true` → build.
+
+### Build status (2026-06-19)
+- ✅ Entitlement migration + `consume_ai_action` RPC
+- ✅ gemini-proxy metering (402 cap, env-gated) + `AiCapError` → paywall
+- ✅ ProfileContext entitlement read + `useEntitlement`
+- ✅ Paywall screen + `ProGate`/`useRequirePro` + purchases.ts seam
+- ✅ CSV/PDF export (Pro-gated) in Settings
+- ✅ Dormant master switches
+- ⬜ Apply gates to existing premium features (voice, Smart Budget, recurring,
+  investments, insights, email coach) — dormant until `MONETIZATION_LIVE`; UX of the
+  heavier ones (whole Investments tab, insights teaser) to confirm
+- ⬜ Google Sheets sync — needs a Google Cloud OAuth client + scope verification
+- ⬜ RevenueCat SDK install + purchase/restore + entitlement webhook — needs the
+  RevenueCat account + store products
+
 ## 9. Margin protection (carry into Phase 4)
 
 - Pro fair-use cap (500 AI actions/mo) even at lifetime — frame as "fair use," not stingy.
