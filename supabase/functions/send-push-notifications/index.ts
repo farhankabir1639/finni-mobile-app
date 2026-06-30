@@ -52,6 +52,19 @@ function monthStart(): string {
   return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
 }
 
+// Whole days from today (UTC) until a 'YYYY-MM-DD' date.
+function daysUntil(dateStr: string): number {
+  const now = new Date();
+  const t0 = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const t1 = Date.UTC(y, (m ?? 1) - 1, d ?? 1);
+  return Math.round((t1 - t0) / 86_400_000);
+}
+
+const CURRENCY_SYMBOL: Record<string, string> = {
+  USD: '$', BDT: '৳', EUR: '€', GBP: '£', AUD: 'A$', CAD: 'C$', SGD: 'S$', INR: '₹',
+};
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST' && req.method !== 'GET') {
     return new Response('Method not allowed', { status: 405 });
@@ -84,6 +97,31 @@ Deno.serve(async (req) => {
     const daysSinceActive = lastActive
       ? Math.floor((Date.now() - lastActive.getTime()) / 86_400_000)
       : 99;
+
+    // 0. Bill reminder (highest priority — time-sensitive + actionable).
+    //    Fire when an active expense template's next_run is exactly
+    //    reminder_days_before days out (once per cycle, no spam).
+    const { data: bills } = await supabase
+      .from('recurring_transactions')
+      .select('description, amount, next_run, reminder_days_before')
+      .eq('user_id', user.id)
+      .eq('active', true)
+      .eq('type', 'expense')
+      .eq('reminder_enabled', true);
+    const dueBill = (bills ?? []).find((b) => daysUntil(b.next_run as string) === (b.reminder_days_before as number));
+    if (dueBill) {
+      const sym = CURRENCY_SYMBOL[(user.currency as string) ?? 'USD'] ?? '';
+      const n = dueBill.reminder_days_before as number;
+      const when = n <= 0 ? 'today' : n === 1 ? 'tomorrow' : `in ${n} days`;
+      const label = (dueBill.description as string | null) || 'A bill';
+      messages.push({
+        to: token,
+        title: `🔔 ${label} due ${when}`,
+        body: `${sym}${Math.round(Number(dueBill.amount))} for ${label} is due ${when}. Tap to review.`,
+        sound: 'default',
+      });
+      continue; // bill reminder wins the day's single notification
+    }
 
     // 1. Weekly summary (Monday only)
     if (monday) {

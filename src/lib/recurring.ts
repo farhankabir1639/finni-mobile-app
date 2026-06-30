@@ -27,6 +27,8 @@ export interface RecurringTemplate {
   next_run: string;
   last_run: string | null;
   active: boolean;
+  reminder_enabled: boolean;
+  reminder_days_before: number;
 }
 
 function localToday(): string {
@@ -102,6 +104,19 @@ export async function pauseRecurring(id: string, active: boolean): Promise<void>
     await supabase.from('recurring_transactions').update(patch).eq('id', id);
   } catch (e) {
     captureError(e, { context: 'pauseRecurring' });
+  }
+}
+
+// Opt-in bill reminder: notify N days before this expense's next occurrence.
+// The daily push cron reads these fields.
+export async function setRecurringReminder(id: string, enabled: boolean, daysBefore: number): Promise<void> {
+  try {
+    await supabase
+      .from('recurring_transactions')
+      .update({ reminder_enabled: enabled, reminder_days_before: daysBefore })
+      .eq('id', id);
+  } catch (e) {
+    captureError(e, { context: 'setRecurringReminder' });
   }
 }
 
