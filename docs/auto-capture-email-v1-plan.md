@@ -108,25 +108,32 @@ is the main setup task and a real open decision (§6).
 
 ## 6b. Go-live checklist (code is DONE 2026-06-19 — these are infra steps)
 
+**Provider decided: Resend** (already our outbound vendor → one account). Resend now
+supports inbound. Note its model differs from SendGrid: the webhook is **metadata
+-only** (`email.received` with an `email_id`), so the function fetches the body via
+`GET https://api.resend.com/emails/receiving/{id}`, and webhooks are **Svix-signed**.
+`process-forwarded-email` (v3) already implements this.
+
 All app + backend code is built and committed behind `EMAIL_CAPTURE_ENABLED=false`.
 To turn the feature on end-to-end:
 
 1. **Apply the migration** `supabase/migrations/20260617_email_capture.sql` in prod
    (`email_sms_connections`, `extracted_transactions`, RLS, dedup index).
-2. **Pick the inbound provider** (open decision §6.1). Easiest: **SendGrid Inbound
-   Parse** — the webhook already expects its `{from,to,subject,text,html}` shape.
-   (Cloudflare Email Routing → Worker is the free alternative.)
-3. **MX records** on `in.heyfinni.com` (the alias domain in `emailCapture.ts`)
-   pointing at the provider.
-4. **Point the provider's webhook** at the deployed function:
-   `https://<project>.functions.supabase.co/process-forwarded-email?token=<SECRET>`.
-5. **Set Supabase secrets** on the function: `INBOUND_WEBHOOK_SECRET` (= the
-   `<SECRET>` in the URL above) and `GEMINI_API_KEY` (already set for other fns).
-6. **Deploy** `process-forwarded-email`.
-7. **Compliance:** update Privacy Policy + Play Data Safety — forwarded email
+2. **Resend → Domains:** add `in.heyfinni.com` for **receiving** and add the **MX
+   record** it gives you (use the subdomain, not the root, to avoid clashing with
+   the sending domain). Verify it. (This is the alias domain in `emailCapture.ts`.)
+3. **Resend → Webhooks:** create a webhook for the **`email.received`** event
+   pointing at the deployed function URL
+   `https://<project>.functions.supabase.co/process-forwarded-email`. Copy its
+   **signing secret** (`whsec_…`).
+4. **Set Supabase secrets** on the function: `RESEND_INBOUND_SIGNING_SECRET`
+   (= the `whsec_…` from step 3). `RESEND_API_KEY` + `GEMINI_API_KEY` are already set.
+5. **Deploy** `process-forwarded-email` **with `--no-verify-jwt`** (Resend's webhook
+   has no Supabase JWT; signature auth is done in-function via Svix).
+6. **Compliance:** update Privacy Policy + Play Data Safety — forwarded email
    content is sent to Gemini for extraction (already OTP-scrubbed + filtered).
-8. **Flip** `EMAIL_CAPTURE_ENABLED = true` in `src/lib/featureFlags.ts` → build.
-9. **Verify on device:** Settings → Auto-import shows your alias; forward a real
+7. **Flip** `EMAIL_CAPTURE_ENABLED = true` in `src/lib/featureFlags.ts` → build.
+8. **Verify on device:** Settings → Auto-import shows your alias; forward a real
    bank/bKash email; confirm it appears in the **Review** tab to accept.
 
 ## 7. Honest take

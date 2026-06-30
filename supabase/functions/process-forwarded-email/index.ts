@@ -1,24 +1,29 @@
-// Supabase Edge Function — process-forwarded-email (v2, rewritten)
-// Inbound webhook (SendGrid Inbound Parse) for a user's forwarded bank/MFS email.
-// Pipeline: token auth → match user by alias → financial filter → OTP scrub →
-// grounded Gemini extraction + categorization → dedup → stage to
-// extracted_transactions (status='pending'). The app's Review screen confirms.
-// See docs/email-forwarding-v1-spec.md.
+// Supabase Edge Function — process-forwarded-email (v3, Resend inbound)
+// Inbound webhook for a user's forwarded bank/MFS email, via Resend Receiving.
 //
-// Secrets: GEMINI_API_KEY, INBOUND_WEBHOOK_SECRET (+ auto SUPABASE_* keys).
+// Resend's webhook is metadata-only: it sends an `email.received` event with an
+// `email_id`; we then fetch the body from the Received Emails API. Pipeline:
+// Svix-verify webhook → fetch email → match user by alias → financial filter →
+// OTP scrub → grounded Gemini extraction + categorization → dedup → stage to
+// extracted_transactions (status='pending'). The app's Review tab confirms.
+//
+// Secrets: GEMINI_API_KEY, RESEND_API_KEY, RESEND_INBOUND_SIGNING_SECRET
+// (Svix signing secret, whsec_…) (+ auto SUPABASE_URL / SERVICE_ROLE_KEY).
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { Webhook } from 'https://esm.sh/svix@1.24.0';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, content-type, svix-id, svix-timestamp, svix-signature',
 };
 
-const SUPABASE_URL     = Deno.env.get('SUPABASE_URL')!;
-const SERVICE_KEY      = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const GEMINI_API_KEY   = Deno.env.get('GEMINI_API_KEY')!;
-const WEBHOOK_SECRET   = Deno.env.get('INBOUND_WEBHOOK_SECRET') ?? '';
-const GEMINI_MODEL     = 'gemini-2.5-flash';
+const SUPABASE_URL    = Deno.env.get('SUPABASE_URL')!;
+const SERVICE_KEY     = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const GEMINI_API_KEY  = Deno.env.get('GEMINI_API_KEY')!;
+const RESEND_API_KEY  = Deno.env.get('RESEND_API_KEY')!;
+const SIGNING_SECRET  = Deno.env.get('RESEND_INBOUND_SIGNING_SECRET') ?? '';
+const GEMINI_MODEL    = 'gemini-2.5-flash';
 
 const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
 
@@ -41,9 +46,16 @@ function scrubOtp(text: string): string {
     .replace(/\b\d{4,8}\b(?=\s*(is your|otp|code|pin))/gi, '[redacted]');
 }
 
-async function sha256(s: string): Promise<string> {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+function emailsFrom(...vals: unknown[]): string[] {
+  const out: string[] = [];
+  for (const v of vals) {
+    const arr = Array.isArray(v) ? v : [v];
+    for (const item of arr) {
+      const m = String(item ?? '').toLowerCase().match(/[^\s<>,;]+@[^\s<>,;]+/g);
+      if (m) out.push(...m);
+    }
+  }
+  return [...new Set(out)];
 }
 
 interface Extracted {
@@ -78,41 +90,78 @@ Return ONLY minified JSON:
   }
 }
 
+// Fetch the full received email body from Resend (the webhook is metadata-only).
+async function fetchReceivedEmail(emailId: string): Promise<{ from: string; to: unknown; received_for: unknown; subject: string; text: string; html: string } | null> {
+  try {
+    const res = await fetch(`https://api.resend.com/emails/receiving/${emailId}`, {
+      headers: { Authorization: `Bearer ${RESEND_API_KEY}` },
+    });
+    if (!res.ok) return null;
+    const d = await res.json();
+    return {
+      from: String(d?.from ?? ''),
+      to: d?.to ?? [],
+      received_for: d?.received_for ?? [],
+      subject: String(d?.subject ?? ''),
+      text: String(d?.text ?? ''),
+      html: String(d?.html ?? ''),
+    };
+  } catch {
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
   try {
-    // 1. Webhook auth — reject anything without the shared secret (prevents spoofed injections).
-    const url = new URL(req.url);
-    const token = url.searchParams.get('token') ?? req.headers.get('x-webhook-token') ?? '';
-    if (!WEBHOOK_SECRET || token !== WEBHOOK_SECRET) return ok({ error: 'unauthorized' }, 401);
+    // 1. Verify the Svix-signed webhook (rejects spoofed/forged inbound events).
+    if (!SIGNING_SECRET) return ok({ error: 'signing secret not configured' }, 500);
+    const raw = await req.text();
+    let event: any;
+    try {
+      const wh = new Webhook(SIGNING_SECRET);
+      event = wh.verify(raw, {
+        'svix-id': req.headers.get('svix-id') ?? '',
+        'svix-timestamp': req.headers.get('svix-timestamp') ?? '',
+        'svix-signature': req.headers.get('svix-signature') ?? '',
+      });
+    } catch {
+      return ok({ error: 'invalid signature' }, 401);
+    }
 
-    const payload = await req.json().catch(() => ({}));
-    const from = String(payload.from ?? '');
-    const to = String(payload.to ?? '').toLowerCase().trim();
-    const subject = String(payload.subject ?? '');
-    const text = String(payload.text ?? payload.html ?? '');
-    if (!to || !text) return ok({ message: 'nothing to process' });
+    if (event?.type !== 'email.received' || !event?.data?.email_id) {
+      return ok({ message: 'ignored event' });
+    }
 
-    // 2. Match user by the forwarding alias (the `to` address). FIX for the old
-    //    bug that used the first active connection.
-    const alias = (to.match(/[^\s<>]+@[^\s<>]+/) ?? [to])[0];
+    // 2. Fetch the body (webhook carries only metadata + email_id).
+    const emailId = String(event.data.email_id);
+    const mail = await fetchReceivedEmail(emailId);
+    if (!mail) return ok({ message: 'could not fetch email' });
+    const from = mail.from || String(event.data.from ?? '');
+    const subject = mail.subject || String(event.data.subject ?? '');
+    const text = mail.text || mail.html || '';
+    if (!text) return ok({ message: 'empty body' });
+
+    // 3. Match user by the forwarding alias (any recipient address). FIX for the
+    //    old bug that used the first active connection.
+    const candidates = emailsFrom(mail.to, mail.received_for, event.data.to);
+    if (!candidates.length) return ok({ message: 'no recipient' });
     const { data: conn } = await supabase
       .from('email_sms_connections')
-      .select('user_id')
+      .select('user_id, forwarding_alias')
       .eq('connection_type', 'email').eq('is_active', true)
-      .eq('forwarding_alias', alias)
+      .in('forwarding_alias', candidates)
       .maybeSingle();
     if (!conn) return ok({ message: 'no matching connection' });
     const userId = conn.user_id as string;
 
-    // 3. Financial filter — drop non-financial mail before it touches the LLM.
+    // 4. Financial filter — drop non-financial mail before it touches the LLM.
     if (!looksFinancial(from, subject, text)) return ok({ message: 'not financial' });
 
-    // 4. OTP scrub + dedup.
+    // 5. OTP scrub.
     const clean = scrubOtp(`${subject}\n${text}`).slice(0, 4000);
-    const sourceHash = await sha256(`${alias}|${from}|${subject}|${text.slice(0, 400)}`);
 
-    // 5. Extract + categorize (grounded).
+    // 6. Extract + categorize (grounded).
     const { data: profile } = await supabase.from('profiles').select('currency').eq('id', userId).maybeSingle();
     const currency = profile?.currency ?? 'BDT';
     const { data: categories } = await supabase.from('categories').select('id, name').eq('user_id', userId);
@@ -125,11 +174,12 @@ Deno.serve(async (req) => {
 
     const matched = (categories ?? []).find((c) => c.name.toLowerCase() === (ex.category ?? '').toLowerCase());
 
-    // 6. Stage (idempotent via unique (user_id, source_hash)).
+    // 7. Stage (idempotent via unique (user_id, source_hash); Resend's email_id
+    //    is unique per received message → perfect dedup key).
     const { error } = await supabase.from('extracted_transactions').upsert({
       user_id: userId,
       source: 'email',
-      source_hash: sourceHash,
+      source_hash: emailId,
       raw_snippet: clean.slice(0, 500),
       amount: ex.amount,
       direction: ex.direction === 'income' ? 'income' : 'expense',
