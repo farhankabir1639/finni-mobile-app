@@ -3,7 +3,7 @@
 // production builds without removing the code.
 
 // Email-forwarding auto-capture (Review inbox + Auto-import setup).
-// Keep FALSE until the SendGrid inbound provider + MX + INBOUND_WEBHOOK_SECRET
-// are configured and the flow is verified end-to-end. See
-// docs/email-forwarding-v1-spec.md. Flip to true to surface it in the app.
-export const EMAIL_CAPTURE_ENABLED = false;
+// Backend live as of 2026-06-19: SendGrid Inbound Parse → process-forwarded-email
+// (deployed, --no-verify-jwt, INBOUND_WEBHOOK_SECRET set), MX on in.heyfinni.com,
+// migrations applied. See docs/auto-capture-email-v1-plan.md §6b.
+export const EMAIL_CAPTURE_ENABLED = true;
