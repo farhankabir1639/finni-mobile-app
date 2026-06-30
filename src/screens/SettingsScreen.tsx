@@ -14,6 +14,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useProfile } from '../contexts/ProfileContext';
 import { useEntitlement } from '../lib/entitlements';
 import { exportTransactionsCSV, exportMonthlyReportPDF } from '../lib/exportData';
+import { syncTransactionsToSheets } from '../lib/sheetsSync';
 import { t, fonts } from '../theme/tokens';
 import { styles } from './settings/settingsStyles';
 import Aurora from '../components/Aurora';
@@ -26,7 +27,7 @@ import GoalsModal from './settings/GoalsModal';
 import NotificationsModal from './settings/NotificationsModal';
 import RecurringModal from './settings/RecurringModal';
 import AutoImportModal from './settings/AutoImportModal';
-import { EMAIL_CAPTURE_ENABLED } from '../lib/featureFlags';
+import { EMAIL_CAPTURE_ENABLED, SHEETS_SYNC_ENABLED } from '../lib/featureFlags';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -72,6 +73,7 @@ export default function SettingsScreen() {
   const { profile, refreshProfile, currencySymbol } = useProfile();
   const { isPro } = useEntitlement();
   const [exporting, setExporting] = useState<null | 'csv' | 'pdf'>(null);
+  const [syncingSheets, setSyncingSheets] = useState(false);
   const [categoriesModalVisible, setCategoriesModalVisible] = useState(false);
   const [goalsModalVisible, setGoalsModalVisible] = useState(false);
   const [editProfileVisible, setEditProfileVisible] = useState(false);
@@ -101,6 +103,25 @@ export default function SettingsScreen() {
       Alert.alert('Export failed', 'Something went wrong creating the file. Please try again.');
     } finally {
       setExporting(null);
+    }
+  };
+
+  const runSheetsSync = async () => {
+    if (!isPro) { navigation.navigate('Paywall', { feature: 'sheets_sync' }); return; }
+    if (!user?.id) return;
+    setSyncingSheets(true);
+    try {
+      const res = await syncTransactionsToSheets(user.id);
+      if (res.ok) {
+        Alert.alert('Synced to Google Sheets', `${res.rows} transactions synced.`, [
+          { text: 'Open sheet', onPress: () => Linking.openURL(res.url) },
+          { text: 'Done', style: 'cancel' },
+        ]);
+      } else if (res.reason !== 'cancelled') {
+        Alert.alert('Sheets sync', res.message ?? 'Could not sync. Please try again.');
+      }
+    } finally {
+      setSyncingSheets(false);
     }
   };
 
@@ -283,6 +304,15 @@ export default function SettingsScreen() {
             loading={exporting === 'pdf'}
             onPress={() => runExport('pdf')}
           />
+          {SHEETS_SYNC_ENABLED && (
+            <SettingsRow
+              label="Sync to Google Sheets"
+              icon="🟢"
+              color={t.green}
+              loading={syncingSheets}
+              onPress={runSheetsSync}
+            />
+          )}
         </View>
 
         {/* Notifications */}
