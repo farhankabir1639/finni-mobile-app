@@ -1,28 +1,25 @@
-// Supabase Edge Function — process-forwarded-email (v3, Resend inbound)
-// Inbound webhook for a user's forwarded bank/MFS email, via Resend Receiving.
+// Supabase Edge Function — process-forwarded-email (v4, SendGrid Inbound Parse)
+// Inbound webhook for a user's forwarded bank/MFS email, via SendGrid Inbound
+// Parse. SendGrid POSTs multipart/form-data (from,to,subject,text,html,…) and
+// does NOT sign requests, so we authenticate with a hard-to-guess token in the
+// webhook URL (?token=…). Pipeline: token auth → match user by alias →
+// financial filter → OTP scrub → grounded Gemini extraction + categorization →
+// dedup → stage to extracted_transactions (status='pending'). The Review tab confirms.
 //
-// Resend's webhook is metadata-only: it sends an `email.received` event with an
-// `email_id`; we then fetch the body from the Received Emails API. Pipeline:
-// Svix-verify webhook → fetch email → match user by alias → financial filter →
-// OTP scrub → grounded Gemini extraction + categorization → dedup → stage to
-// extracted_transactions (status='pending'). The app's Review tab confirms.
-//
-// Secrets: GEMINI_API_KEY, RESEND_API_KEY, RESEND_INBOUND_SIGNING_SECRET
-// (Svix signing secret, whsec_…) (+ auto SUPABASE_URL / SERVICE_ROLE_KEY).
+// Secrets: GEMINI_API_KEY, INBOUND_WEBHOOK_SECRET (+ auto SUPABASE_* keys).
+// Deploy with --no-verify-jwt (SendGrid has no Supabase JWT).
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { Webhook } from 'https://esm.sh/svix@1.24.0';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, content-type, svix-id, svix-timestamp, svix-signature',
+  'Access-Control-Allow-Headers': 'authorization, content-type',
 };
 
 const SUPABASE_URL    = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_KEY     = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const GEMINI_API_KEY  = Deno.env.get('GEMINI_API_KEY')!;
-const RESEND_API_KEY  = Deno.env.get('RESEND_API_KEY')!;
-const SIGNING_SECRET  = Deno.env.get('RESEND_INBOUND_SIGNING_SECRET') ?? '';
+const WEBHOOK_SECRET  = Deno.env.get('INBOUND_WEBHOOK_SECRET') ?? '';
 const GEMINI_MODEL    = 'gemini-2.5-flash';
 
 const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
@@ -46,14 +43,16 @@ function scrubOtp(text: string): string {
     .replace(/\b\d{4,8}\b(?=\s*(is your|otp|code|pin))/gi, '[redacted]');
 }
 
+async function sha256(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 function emailsFrom(...vals: unknown[]): string[] {
   const out: string[] = [];
   for (const v of vals) {
-    const arr = Array.isArray(v) ? v : [v];
-    for (const item of arr) {
-      const m = String(item ?? '').toLowerCase().match(/[^\s<>,;]+@[^\s<>,;]+/g);
-      if (m) out.push(...m);
-    }
+    const m = String(v ?? '').toLowerCase().match(/[^\s<>,;]+@[^\s<>,;]+/g);
+    if (m) out.push(...m);
   }
   return [...new Set(out)];
 }
@@ -90,65 +89,29 @@ Return ONLY minified JSON:
   }
 }
 
-// Fetch the full received email body from Resend (the webhook is metadata-only).
-async function fetchReceivedEmail(emailId: string): Promise<{ from: string; to: unknown; received_for: unknown; subject: string; text: string; html: string } | null> {
-  try {
-    const res = await fetch(`https://api.resend.com/emails/receiving/${emailId}`, {
-      headers: { Authorization: `Bearer ${RESEND_API_KEY}` },
-    });
-    if (!res.ok) return null;
-    const d = await res.json();
-    return {
-      from: String(d?.from ?? ''),
-      to: d?.to ?? [],
-      received_for: d?.received_for ?? [],
-      subject: String(d?.subject ?? ''),
-      text: String(d?.text ?? ''),
-      html: String(d?.html ?? ''),
-    };
-  } catch {
-    return null;
-  }
-}
-
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
   try {
-    // 1. Verify the Svix-signed webhook (rejects spoofed/forged inbound events).
-    if (!SIGNING_SECRET) return ok({ error: 'signing secret not configured' }, 500);
-    const raw = await req.text();
-    let event: any;
-    try {
-      const wh = new Webhook(SIGNING_SECRET);
-      event = wh.verify(raw, {
-        'svix-id': req.headers.get('svix-id') ?? '',
-        'svix-timestamp': req.headers.get('svix-timestamp') ?? '',
-        'svix-signature': req.headers.get('svix-signature') ?? '',
-      });
-    } catch {
-      return ok({ error: 'invalid signature' }, 401);
-    }
+    // 1. Auth — SendGrid Inbound Parse doesn't sign, so guard with a URL token.
+    const reqUrl = new URL(req.url);
+    const token = reqUrl.searchParams.get('token') ?? req.headers.get('x-webhook-token') ?? '';
+    if (!WEBHOOK_SECRET || token !== WEBHOOK_SECRET) return ok({ error: 'unauthorized' }, 401);
 
-    if (event?.type !== 'email.received' || !event?.data?.email_id) {
-      return ok({ message: 'ignored event' });
-    }
-
-    // 2. Fetch the body (webhook carries only metadata + email_id).
-    const emailId = String(event.data.email_id);
-    const mail = await fetchReceivedEmail(emailId);
-    if (!mail) return ok({ message: 'could not fetch email' });
-    const from = mail.from || String(event.data.from ?? '');
-    const subject = mail.subject || String(event.data.subject ?? '');
-    const text = mail.text || mail.html || '';
-    if (!text) return ok({ message: 'empty body' });
+    // 2. SendGrid posts multipart/form-data with parsed fields.
+    const form = await req.formData();
+    const from = String(form.get('from') ?? '');
+    const to = String(form.get('to') ?? '');
+    const subject = String(form.get('subject') ?? '');
+    const text = String(form.get('text') ?? form.get('html') ?? '');
+    if (!to || !text) return ok({ message: 'nothing to process' });
 
     // 3. Match user by the forwarding alias (any recipient address). FIX for the
     //    old bug that used the first active connection.
-    const candidates = emailsFrom(mail.to, mail.received_for, event.data.to);
+    const candidates = emailsFrom(to, form.get('envelope'));
     if (!candidates.length) return ok({ message: 'no recipient' });
     const { data: conn } = await supabase
       .from('email_sms_connections')
-      .select('user_id, forwarding_alias')
+      .select('user_id')
       .eq('connection_type', 'email').eq('is_active', true)
       .in('forwarding_alias', candidates)
       .maybeSingle();
@@ -158,8 +121,9 @@ Deno.serve(async (req) => {
     // 4. Financial filter — drop non-financial mail before it touches the LLM.
     if (!looksFinancial(from, subject, text)) return ok({ message: 'not financial' });
 
-    // 5. OTP scrub.
+    // 5. OTP scrub + dedup key (no provider message-id in parsed mode → content hash).
     const clean = scrubOtp(`${subject}\n${text}`).slice(0, 4000);
+    const sourceHash = await sha256(`${candidates[0]}|${from}|${subject}|${text.slice(0, 400)}`);
 
     // 6. Extract + categorize (grounded).
     const { data: profile } = await supabase.from('profiles').select('currency').eq('id', userId).maybeSingle();
@@ -174,12 +138,11 @@ Deno.serve(async (req) => {
 
     const matched = (categories ?? []).find((c) => c.name.toLowerCase() === (ex.category ?? '').toLowerCase());
 
-    // 7. Stage (idempotent via unique (user_id, source_hash); Resend's email_id
-    //    is unique per received message → perfect dedup key).
+    // 7. Stage (idempotent via unique (user_id, source_hash)).
     const { error } = await supabase.from('extracted_transactions').upsert({
       user_id: userId,
       source: 'email',
-      source_hash: emailId,
+      source_hash: sourceHash,
       raw_snippet: clean.slice(0, 500),
       amount: ex.amount,
       direction: ex.direction === 'income' ? 'income' : 'expense',

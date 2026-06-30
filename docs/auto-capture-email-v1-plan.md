@@ -108,33 +108,38 @@ is the main setup task and a real open decision (§6).
 
 ## 6b. Go-live checklist (code is DONE 2026-06-19 — these are infra steps)
 
-**Provider decided: Resend** (already our outbound vendor → one account). Resend now
-supports inbound. Note its model differs from SendGrid: the webhook is **metadata
--only** (`email.received` with an `email_id`), so the function fetches the body via
-`GET https://api.resend.com/emails/receiving/{id}`, and webhooks are **Svix-signed**.
-`process-forwarded-email` (v3) already implements this.
+**Provider decided: SendGrid Inbound Parse** (free; **MX-only**, so heyfinni.com
+stays at Namecheap — no nameserver migration). SendGrid POSTs `multipart/form-data`
+(`from,to,subject,text,html,envelope`) and does **not** sign requests, so the
+function authenticates via a hard-to-guess **URL token** (`?token=…`).
+`process-forwarded-email` (v4) implements this. (We do NOT need SendGrid Sender
+Authentication — that's for *sending*, which we do via Resend.)
 
 All app + backend code is built and committed behind `EMAIL_CAPTURE_ENABLED=false`.
 To turn the feature on end-to-end:
 
-1. **Apply the migration** `supabase/migrations/20260617_email_capture.sql` in prod
-   (`email_sms_connections`, `extracted_transactions`, RLS, dedup index).
-2. **Resend → Domains:** add `in.heyfinni.com` for **receiving** and add the **MX
-   record** it gives you (use the subdomain, not the root, to avoid clashing with
-   the sending domain). Verify it. (This is the alias domain in `emailCapture.ts`.)
-3. **Resend → Webhooks:** create a webhook for the **`email.received`** event
-   pointing at the deployed function URL
-   `https://<project>.functions.supabase.co/process-forwarded-email`. Copy its
-   **signing secret** (`whsec_…`).
-4. **Set Supabase secrets** on the function: `RESEND_INBOUND_SIGNING_SECRET`
-   (= the `whsec_…` from step 3). `RESEND_API_KEY` + `GEMINI_API_KEY` are already set.
-5. **Deploy** `process-forwarded-email` **with `--no-verify-jwt`** (Resend's webhook
-   has no Supabase JWT; signature auth is done in-function via Svix).
-6. **Compliance:** update Privacy Policy + Play Data Safety — forwarded email
+1. **Apply the migrations** in prod: `20260617_email_capture.sql` then
+   `20260619_email_capture_fixup.sql` (the fixup reconciles the legacy prototype
+   tables; on this prod DB run the fixup — see note below).
+2. **Generate a webhook secret**, e.g. `openssl rand -hex 24`. Use it for both the
+   `?token=` below and the `INBOUND_WEBHOOK_SECRET` Supabase secret.
+3. **SendGrid → Settings → Inbound Parse → Add Host & URL:**
+   - Receiving domain: subdomain `in`, domain `heyfinni.com` (host = `in.heyfinni.com`).
+   - Destination URL:
+     `https://ntsisizkaitqdtcuchpk.supabase.co/functions/v1/process-forwarded-email?token=<SECRET>`
+   - Leave "POST the raw, full MIME message" **unchecked** (we want parsed fields).
+4. **Namecheap → Advanced DNS:** add the **MX record** on the `in` subdomain that
+   SendGrid shows (host `in`, value `mx.sendgrid.net`, priority `10`). This is the
+   only DNS change — nothing else on heyfinni.com is touched.
+5. **Set Supabase secret:** `INBOUND_WEBHOOK_SECRET=<SECRET>` (`GEMINI_API_KEY`
+   already set).
+6. **Deploy** `process-forwarded-email` **with `--no-verify-jwt`** (SendGrid has no
+   Supabase JWT; auth is the URL token).
+7. **Compliance:** update Privacy Policy + Play Data Safety — forwarded email
    content is sent to Gemini for extraction (already OTP-scrubbed + filtered).
-7. **Flip** `EMAIL_CAPTURE_ENABLED = true` in `src/lib/featureFlags.ts` → build.
-8. **Verify on device:** Settings → Auto-import shows your alias; forward a real
-   bank/bKash email; confirm it appears in the **Review** tab to accept.
+8. **Flip** `EMAIL_CAPTURE_ENABLED = true` in `src/lib/featureFlags.ts` → build.
+9. **Verify on device:** Settings → Auto-import shows your alias; forward a real
+   bank/bKash email to it; confirm it appears in the **Review** tab to accept.
 
 ## 7. Honest take
 
