@@ -106,6 +106,29 @@ is the main setup task and a real open decision (§6).
 
 ---
 
+## 6b. Go-live checklist (code is DONE 2026-06-19 — these are infra steps)
+
+All app + backend code is built and committed behind `EMAIL_CAPTURE_ENABLED=false`.
+To turn the feature on end-to-end:
+
+1. **Apply the migration** `supabase/migrations/20260617_email_capture.sql` in prod
+   (`email_sms_connections`, `extracted_transactions`, RLS, dedup index).
+2. **Pick the inbound provider** (open decision §6.1). Easiest: **SendGrid Inbound
+   Parse** — the webhook already expects its `{from,to,subject,text,html}` shape.
+   (Cloudflare Email Routing → Worker is the free alternative.)
+3. **MX records** on `in.heyfinni.com` (the alias domain in `emailCapture.ts`)
+   pointing at the provider.
+4. **Point the provider's webhook** at the deployed function:
+   `https://<project>.functions.supabase.co/process-forwarded-email?token=<SECRET>`.
+5. **Set Supabase secrets** on the function: `INBOUND_WEBHOOK_SECRET` (= the
+   `<SECRET>` in the URL above) and `GEMINI_API_KEY` (already set for other fns).
+6. **Deploy** `process-forwarded-email`.
+7. **Compliance:** update Privacy Policy + Play Data Safety — forwarded email
+   content is sent to Gemini for extraction (already OTP-scrubbed + filtered).
+8. **Flip** `EMAIL_CAPTURE_ENABLED = true` in `src/lib/featureFlags.ts` → build.
+9. **Verify on device:** Settings → Auto-import shows your alias; forward a real
+   bank/bKash email; confirm it appears in the **Review** tab to accept.
+
 ## 7. Honest take
 
 The deployed backend is a **scaffold, not a head start you can ship** — it's
