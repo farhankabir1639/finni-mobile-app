@@ -1,10 +1,16 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import Svg, { Path } from 'react-native-svg';
 import Aurora from '../components/Aurora';
+import ReviewQueue from '../components/ReviewQueue';
 import { t, fonts } from '../theme/tokens';
 import { EMAIL_CAPTURE_ENABLED } from '../lib/featureFlags';
+import { useAuth } from '../contexts/AuthContext';
+import { useProfile } from '../contexts/ProfileContext';
+import { supabase } from '../lib/supabase';
+import { type PickerCategory } from '../components/CategoryPickerSheet';
 
 function InboxGlyph({ size = 40, color = t.auraAqua }: { size?: number; color?: string }) {
   return (
@@ -15,11 +21,24 @@ function InboxGlyph({ size = 40, color = t.auraAqua }: { size?: number; color?: 
   );
 }
 
-// The Review tab. Auto-capture (email/push) is gated behind EMAIL_CAPTURE_ENABLED;
-// until it ships this shows a "coming soon" state. When the flag flips, this is
-// where the captured-transaction review queue renders.
+// The Review tab — confirms transactions Finni auto-captures from forwarded
+// emails. Gated behind EMAIL_CAPTURE_ENABLED; until the inbound provider is
+// wired it shows a "coming soon" state.
 export default function ReviewScreen() {
   const { width, height } = useWindowDimensions();
+  const { user } = useAuth();
+  const { currencySymbol } = useProfile();
+  const [categories, setCategories] = useState<PickerCategory[]>([]);
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    if (!EMAIL_CAPTURE_ENABLED || !user?.id) return;
+    supabase.from('categories').select('id, name, emoji').eq('user_id', user.id)
+      .then(({ data }) => setCategories((data ?? []) as PickerCategory[]));
+  }, [user?.id]);
+
+  // Re-fetch the queue each time the tab gains focus.
+  useFocusEffect(useCallback(() => { setReload((n) => n + 1); }, []));
 
   return (
     <View style={styles.outer}>
@@ -30,19 +49,24 @@ export default function ReviewScreen() {
           <Text style={[styles.sub, { fontFamily: fonts.regular }]}>Confirm transactions Finni captures for you</Text>
         </View>
 
-        <View style={styles.center}>
-          <View style={styles.iconWrap}>
-            <InboxGlyph />
+        {EMAIL_CAPTURE_ENABLED && user?.id ? (
+          <ReviewQueue
+            userId={user.id}
+            categories={categories}
+            currencySymbol={currencySymbol}
+            reloadSignal={reload}
+          />
+        ) : (
+          <View style={styles.center}>
+            <View style={styles.iconWrap}>
+              <InboxGlyph />
+            </View>
+            <Text style={[styles.emptyTitle, { fontFamily: fonts.bold }]}>Auto-import is coming soon</Text>
+            <Text style={[styles.emptySub, { fontFamily: fonts.regular }]}>
+              Soon you'll be able to forward your bank & bKash/Nagad emails to Finni — it'll read each transaction for you to approve here. For now, just tell Finni in chat.
+            </Text>
           </View>
-          <Text style={[styles.emptyTitle, { fontFamily: fonts.bold }]}>
-            {EMAIL_CAPTURE_ENABLED ? 'Nothing to review yet' : 'Auto-import is coming soon'}
-          </Text>
-          <Text style={[styles.emptySub, { fontFamily: fonts.regular }]}>
-            {EMAIL_CAPTURE_ENABLED
-              ? 'Forward your bank emails to Finni and captured transactions will appear here to confirm.'
-              : "Soon you'll be able to forward your bank & bKash/Nagad emails to Finni — it'll read each transaction for you to approve here. For now, just tell Finni in chat."}
-          </Text>
-        </View>
+        )}
       </SafeAreaView>
     </View>
   );
