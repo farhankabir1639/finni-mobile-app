@@ -6,6 +6,7 @@ import { useProfile } from '../contexts/ProfileContext';
 import MainTabs from './MainTabs';
 import SettingsScreen from '../screens/SettingsScreen';
 import PaywallScreen from '../screens/PaywallScreen';
+import NetWorthScreen from '../screens/NetWorthScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
 import SignupScreen from '../screens/auth/SignupScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
@@ -57,6 +58,7 @@ export default function AppNavigator() {
               <Stack.Screen name="MainTabs" component={MainTabs} />
               <Stack.Screen name="Settings" component={SettingsScreen} options={{ presentation: 'modal' }} />
               <Stack.Screen name="Paywall" component={PaywallScreen} options={{ presentation: 'modal' }} />
+              <Stack.Screen name="NetWorth" component={NetWorthScreen} />
             </>
           ) : (
             <Stack.Screen name="Onboarding" component={OnboardingScreen} />

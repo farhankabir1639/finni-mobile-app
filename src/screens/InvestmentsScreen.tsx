@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal,
   TextInput, Alert, ActivityIndicator, Dimensions, KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfile } from '../contexts/ProfileContext';
 import { supabase } from '../lib/supabase';
@@ -258,6 +258,7 @@ export default function InvestmentsScreen() {
   const [formCurrentVal, setFormCurrentVal] = useState('');
   const [formNotes, setFormNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const navigation = useNavigation<any>();
 
   const fetchInvestments = useCallback(async () => {
     if (!user?.id) return;
@@ -409,6 +410,12 @@ export default function InvestmentsScreen() {
             <Text style={s.addHeaderBtnText}>+ Add</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Net worth entry — investments are auto-included there */}
+        <TouchableOpacity style={s.netWorthRow} onPress={() => navigation.navigate('NetWorth')} activeOpacity={0.8}>
+          <Text style={s.netWorthLabel}>📊  View net worth</Text>
+          <Text style={s.netWorthChevron}>›</Text>
+        </TouchableOpacity>
 
         {investments.length === 0 ? (
           /* Empty state */
@@ -731,6 +738,9 @@ const s = StyleSheet.create({
   holdingsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   addHeaderBtn: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: t.rPill, backgroundColor: t.auraAqua },
   addHeaderBtnText: { fontSize: 14, fontFamily: fonts.semiBold, fontWeight: '600', color: '#07070E' },
+  netWorthRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, marginBottom: 4, paddingHorizontal: 16, paddingVertical: 13, borderRadius: t.rMd, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: t.glassLine },
+  netWorthLabel: { fontSize: 14.5, fontFamily: fonts.semiBold, color: t.text },
+  netWorthChevron: { fontSize: 20, color: t.text3 },
   addInvBtn: { marginTop: 16, paddingVertical: 15, borderRadius: t.rMd, borderWidth: 1, borderColor: t.auraAqua, alignItems: 'center' },
   addInvBtnText: { fontSize: 15, fontFamily: fonts.semiBold, fontWeight: '600', color: t.auraAqua },
   chip: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: t.rPill, backgroundColor: t.glass, borderWidth: 1, borderColor: t.glassLine },
