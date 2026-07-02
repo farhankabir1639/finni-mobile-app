@@ -1,49 +1,27 @@
 // ── Google Sheets sync (Pro) ─────────────────────────────────────────────────
-// One-way push: Finni → a "Finni Transactions" Google Sheet the user owns.
-// "Sync now" flow: Google OAuth (implicit, drive.file scope — no client secret,
-// only sheets Finni created) → get-or-create the spreadsheet → overwrite rows.
+// One-way push: Finni → a user-owned "Finni Transactions" Google Sheet.
+// OAuth is handled in the UI via expo-auth-session's Google provider (it derives
+// the correct per-platform redirect from the Android client ID). This module is
+// the token-agnostic REST + orchestration layer: given a Google access token
+// (drive.file scope), it get-or-creates the sheet and clear+rewrites the rows.
 //
 // Gated behind SHEETS_SYNC_ENABLED. Needs a Google Cloud OAuth client +
 // EXPO_PUBLIC_GOOGLE_SHEETS_CLIENT_ID + scope verification — see
-// docs/sheets-sync-setup.md. Background/auto sync (refresh tokens, server-side)
-// is a later phase; this is manual "Sync now".
+// docs/sheets-sync-setup.md.
 
-import * as WebBrowser from 'expo-web-browser';
-import * as AuthSession from 'expo-auth-session';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 import { captureError } from './sentry';
 
-WebBrowser.maybeCompleteAuthSession();
+export const SHEETS_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_SHEETS_CLIENT_ID ?? '';
+export const SHEETS_CONFIGURED = !!SHEETS_CLIENT_ID;
+export const SHEETS_SCOPES = ['https://www.googleapis.com/auth/drive.file'];
 
-const CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_SHEETS_CLIENT_ID ?? '';
-const SCOPE = 'https://www.googleapis.com/auth/drive.file';
-const AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
 const sheetIdKey = (userId: string) => `sheets_sync_id_${userId}`;
 
 export type SyncResult =
   | { ok: true; url: string; rows: number }
   | { ok: false; reason: 'not_configured' | 'cancelled' | 'error'; message?: string };
-
-export const SHEETS_CONFIGURED = !!CLIENT_ID;
-
-// ── OAuth (implicit) — returns a short-lived access token ────────────────────
-async function getAccessToken(): Promise<string | null> {
-  if (!CLIENT_ID) return null;
-  const redirectUri = AuthSession.makeRedirectUri({ scheme: 'finni-app', path: 'sheets/callback' });
-  const url =
-    `${AUTH_ENDPOINT}?client_id=${encodeURIComponent(CLIENT_ID)}` +
-    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-    `&response_type=token` +
-    `&scope=${encodeURIComponent(SCOPE)}` +
-    `&prompt=consent`;
-  const result = await WebBrowser.openAuthSessionAsync(url, redirectUri);
-  if (result.type !== 'success' || !result.url) return null;
-  // Implicit flow returns the token in the URL fragment.
-  const frag = result.url.split('#')[1] ?? '';
-  const params = new URLSearchParams(frag);
-  return params.get('access_token');
-}
 
 // ── Sheets REST helpers ──────────────────────────────────────────────────────
 async function createSpreadsheet(token: string): Promise<string | null> {
@@ -103,13 +81,10 @@ async function buildRows(userId: string): Promise<(string | number)[][]> {
   return rows;
 }
 
-// ── Public: manual "Sync now" ────────────────────────────────────────────────
-export async function syncTransactionsToSheets(userId: string): Promise<SyncResult> {
-  if (!SHEETS_CONFIGURED) return { ok: false, reason: 'not_configured', message: 'Google Sheets isn’t set up in this build yet.' };
+// ── Public: push everything to the sheet, given an OAuth token ───────────────
+export async function pushTransactionsToSheet(userId: string, token: string): Promise<SyncResult> {
+  if (!token) return { ok: false, reason: 'error', message: 'No Google access token.' };
   try {
-    const token = await getAccessToken();
-    if (!token) return { ok: false, reason: 'cancelled' };
-
     // Reuse the user's existing Finni sheet if it's still there, else create one.
     let id = await AsyncStorage.getItem(sheetIdKey(userId));
     if (id && !(await spreadsheetExists(token, id))) id = null;
@@ -118,14 +93,12 @@ export async function syncTransactionsToSheets(userId: string): Promise<SyncResu
       if (!id) return { ok: false, reason: 'error', message: 'Could not create the spreadsheet.' };
       await AsyncStorage.setItem(sheetIdKey(userId), id);
     }
-
     const rows = await buildRows(userId);
     const wrote = await writeValues(token, id, rows);
     if (!wrote) return { ok: false, reason: 'error', message: 'Could not write to the spreadsheet.' };
-
     return { ok: true, url: `https://docs.google.com/spreadsheets/d/${id}`, rows: rows.length - 1 };
   } catch (e) {
-    captureError(e, { context: 'syncTransactionsToSheets' });
+    captureError(e, { context: 'pushTransactionsToSheet' });
     return { ok: false, reason: 'error', message: 'Sync failed. Please try again.' };
   }
 }
