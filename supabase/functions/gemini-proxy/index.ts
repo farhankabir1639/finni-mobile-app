@@ -66,13 +66,17 @@ Deno.serve(async (req) => {
   }
 
   // Monthly AI-action metering. Only enforced for explicitly-metered calls
-  // (interactive chat). Runs as the signed-in user, so the RPC's auth.uid()
-  // resolves and the per-user counter is race-safe (SELECT ... FOR UPDATE).
-  // Free = 50/mo, Pro = 500/mo. On cap → 402 (the client maps it to a paywall).
-  if (METERING_ENABLED && body.meter === true) {
+  // (interactive chat). Two-phase so retries don't over-count: (1) a DRY-RUN
+  // check here rejects a capped user before we spend a Gemini call; (2) the real
+  // increment happens only after Gemini returns 2xx (below). Runs as the
+  // signed-in user, so auth.uid() resolves and the counter is race-safe.
+  // Free = 50/mo, Pro = 500/mo. On cap → 402 (client maps it to a paywall).
+  const metered = METERING_ENABLED && body.meter === true;
+  if (metered) {
     const { data: gate, error: gateErr } = await supabase.rpc('consume_ai_action', {
       p_free_limit: 50,
       p_pro_limit: 500,
+      p_dry_run: true,
     });
     // Fail-open on metering errors: never block a paying/active user because the
     // counter hiccuped — we'd rather eat a little cost than break the core flow.
@@ -110,6 +114,13 @@ Deno.serve(async (req) => {
     // Pass through Gemini's response status and body verbatim
     // This preserves 429/503 status codes so client retry logic works unchanged
     const geminiBody = await geminiRes.text();
+
+    // Count the action only on a successful (2xx) generation, so infra-error
+    // retries (503/504/timeout) don't burn the user's quota.
+    if (metered && geminiRes.ok) {
+      await supabase.rpc('consume_ai_action', { p_free_limit: 50, p_pro_limit: 500, p_dry_run: false });
+    }
+
     return new Response(geminiBody, {
       status: geminiRes.status,
       headers: { 'Content-Type': 'application/json' },

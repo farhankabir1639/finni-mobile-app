@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase, supabaseUrl } from './supabase';
 import { captureError } from './sentry';
+import { MONETIZATION_LIVE } from './featureFlags';
 import { classifyChatIntent } from './chat/intent';
 import { buildChatPrompt } from './chat/buildChatPrompt';
 
@@ -954,9 +955,11 @@ export async function chatAgent(
   ];
 
   try {
-    // Interactive "Message Finni" — the one user-initiated call we meter
-    // against the monthly AI-action quota (manual logging stays unlimited).
-    const text = await callGeminiWithHistory(contents, 0, undefined, true);
+    // Interactive "Message Finni" — the one user-initiated call we meter against
+    // the monthly AI-action quota (manual logging stays unlimited). Only request
+    // metering when monetization is live, so a server-only METERING_ENABLED flip
+    // can never cap/strand users while the client still treats everyone as Pro.
+    const text = await callGeminiWithHistory(contents, 0, undefined, MONETIZATION_LIVE);
     let { response, txData, txDataArray, newCategory, goalUpdate, goalCreate, categoryBudgetUpdate, investmentData, txParseError } = extractTransactionData(text);
 
     if (txParseError) {

@@ -99,20 +99,26 @@ Deno.serve(async (req) => {
       : 99;
 
     // 0. Bill reminder (highest priority — time-sensitive + actionable).
-    //    Fire when an active expense template's next_run is exactly
-    //    reminder_days_before days out (once per cycle, no spam).
+    //    Fire once per occurrence when it enters the reminder window
+    //    (0..reminder_days_before days before due). Guarded by reminder_last_sent
+    //    (= the next_run we last reminded for) so a skipped cron day doesn't miss
+    //    the reminder and we never double-send for the same occurrence.
     const { data: bills } = await supabase
       .from('recurring_transactions')
-      .select('description, amount, next_run, reminder_days_before')
+      .select('id, description, amount, next_run, reminder_days_before, reminder_last_sent')
       .eq('user_id', user.id)
       .eq('active', true)
       .eq('type', 'expense')
       .eq('reminder_enabled', true);
-    const dueBill = (bills ?? []).find((b) => daysUntil(b.next_run as string) === (b.reminder_days_before as number));
+    const dueBill = (bills ?? []).find((b) => {
+      const d = daysUntil(b.next_run as string);
+      return d >= 0 && d <= (b.reminder_days_before as number)
+        && (b.reminder_last_sent as string | null) !== (b.next_run as string);
+    });
     if (dueBill) {
       const sym = CURRENCY_SYMBOL[(user.currency as string) ?? 'USD'] ?? '';
-      const n = dueBill.reminder_days_before as number;
-      const when = n <= 0 ? 'today' : n === 1 ? 'tomorrow' : `in ${n} days`;
+      const d = daysUntil(dueBill.next_run as string);
+      const when = d <= 0 ? 'today' : d === 1 ? 'tomorrow' : `in ${d} days`;
       const label = (dueBill.description as string | null) || 'A bill';
       messages.push({
         to: token,
@@ -120,6 +126,10 @@ Deno.serve(async (req) => {
         body: `${sym}${Math.round(Number(dueBill.amount))} for ${label} is due ${when}. Tap to review.`,
         sound: 'default',
       });
+      // Mark this occurrence reminded so we don't send again for the same due date.
+      await supabase.from('recurring_transactions')
+        .update({ reminder_last_sent: dueBill.next_run })
+        .eq('id', dueBill.id);
       continue; // bill reminder wins the day's single notification
     }
 

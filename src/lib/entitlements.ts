@@ -8,15 +8,11 @@
 // (supabase/migrations/20260619_entitlements.sql).
 
 import { useProfile } from '../contexts/ProfileContext';
+import { MONETIZATION_LIVE } from './featureFlags';
 
-// ── Master go-live switch ────────────────────────────────────────────────────
-// While false, NOTHING is gated and EVERYONE is treated as Pro — the paywall is
-// still reachable (so pricing is visible) but no feature locks and no one can be
-// stranded behind a paywall that can't complete a purchase yet. Flip to true
-// only once RevenueCat is wired (PURCHASES_ENABLED) AND the entitlement
-// migration is applied in prod. Pairs with the server-side METERING_ENABLED env
-// on the gemini-proxy edge function (keep both in sync).
-export const MONETIZATION_LIVE = false;
+// Master go-live switch — single source of truth in featureFlags.ts, re-exported
+// here for convenience. While false, nothing is gated and everyone is Pro.
+export { MONETIZATION_LIVE };
 
 export const FREE_AI_LIMIT = 50;   // AI actions / month, free tier
 export const PRO_AI_LIMIT = 500;   // AI actions / month, Pro fair-use

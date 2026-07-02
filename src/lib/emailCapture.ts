@@ -6,8 +6,6 @@
 import { supabase } from './supabase';
 import { captureError } from './sentry';
 
-const ALIAS_DOMAIN = 'in.heyfinni.com';
-
 export interface ExtractedTxn {
   id: string;
   source: 'email' | 'push';
@@ -21,12 +19,10 @@ export interface ExtractedTxn {
   status: 'pending' | 'accepted' | 'rejected';
 }
 
-function makeToken(): string {
-  // Unguessable-ish alias token (no native crypto dependency required).
-  return `${Math.random().toString(36).slice(2, 8)}${Math.random().toString(36).slice(2, 8)}`;
-}
-
 // Return the user's forwarding alias, creating the connection on first use.
+// The alias is generated DB-side (gen_random_uuid default → unguessable), not
+// client-side, so it can't be predicted or brute-forced. Requires the
+// 20260702_harden_alias migration (sets the column default).
 export async function getOrCreateForwardingAlias(userId: string): Promise<string | null> {
   if (!userId) return null;
   try {
@@ -37,12 +33,16 @@ export async function getOrCreateForwardingAlias(userId: string): Promise<string
       .maybeSingle();
     if (existing?.forwarding_alias) return existing.forwarding_alias;
 
-    const alias = `u-${makeToken()}@${ALIAS_DOMAIN}`;
-    const { error } = await supabase.from('email_sms_connections').insert({
-      user_id: userId, connection_type: 'email', forwarding_alias: alias, is_active: true,
-    });
-    if (error) { captureError(error, { context: 'getOrCreateForwardingAlias' }); return null; }
-    return alias;
+    // Insert without an alias — the DB default fills an unguessable one; read it back.
+    const { data, error } = await supabase.from('email_sms_connections')
+      .insert({ user_id: userId, connection_type: 'email', is_active: true })
+      .select('forwarding_alias')
+      .single();
+    if (error || !data?.forwarding_alias) {
+      captureError(error ?? new Error('alias not generated'), { context: 'getOrCreateForwardingAlias' });
+      return null;
+    }
+    return data.forwarding_alias as string;
   } catch (e) {
     captureError(e, { context: 'getOrCreateForwardingAlias' });
     return null;
@@ -55,7 +55,8 @@ export async function getPendingCount(userId: string): Promise<number> {
     const { count } = await supabase
       .from('extracted_transactions')
       .select('id', { count: 'exact', head: true })
-      .eq('user_id', userId).eq('status', 'pending');
+      .eq('user_id', userId).eq('status', 'pending')
+      .gt('amount', 0);   // exclude legacy prototype rows (null/0 amount)
     return count ?? 0;
   } catch {
     return 0;
@@ -69,6 +70,7 @@ export async function listPending(userId: string): Promise<ExtractedTxn[]> {
       .from('extracted_transactions')
       .select('id, source, amount, direction, merchant, currency, occurred_at, suggested_category_id, confidence, status')
       .eq('user_id', userId).eq('status', 'pending')
+      .gt('amount', 0)   // exclude legacy prototype rows (null/0 amount)
       .order('created_at', { ascending: false });
     return (data ?? []) as ExtractedTxn[];
   } catch {
@@ -80,6 +82,16 @@ export async function listPending(userId: string): Promise<ExtractedTxn[]> {
 export async function acceptExtracted(userId: string, item: ExtractedTxn, categoryId: string | null): Promise<boolean> {
   if (!userId) return false;
   try {
+    // Atomically claim the row (pending → accepted) BEFORE inserting, so a
+    // double-tap or the two mount points (ReviewModal + ReviewScreen tab) can't
+    // both insert and double-book. Only the caller that flips it proceeds.
+    const { data: claimed } = await supabase
+      .from('extracted_transactions')
+      .update({ status: 'accepted' })
+      .eq('id', item.id).eq('user_id', userId).eq('status', 'pending')
+      .select('id');
+    if (!claimed || claimed.length === 0) return true; // already processed
+
     const isExpense = item.direction !== 'income';
     const desc = item.merchant ?? 'Imported transaction';
     const { error: insErr } = await supabase.from('transactions').insert({
@@ -94,8 +106,12 @@ export async function acceptExtracted(userId: string, item: ExtractedTxn, catego
       matching_score: Math.round((item.confidence ?? 0.5) * 100),
       category_id: categoryId,
     });
-    if (insErr) { captureError(insErr, { context: 'acceptExtracted.insert' }); return false; }
-    await supabase.from('extracted_transactions').update({ status: 'accepted' }).eq('id', item.id).eq('user_id', userId);
+    if (insErr) {
+      // Revert the claim so the item returns to the queue and can be retried.
+      await supabase.from('extracted_transactions').update({ status: 'pending' }).eq('id', item.id).eq('user_id', userId);
+      captureError(insErr, { context: 'acceptExtracted.insert' });
+      return false;
+    }
     return true;
   } catch (e) {
     captureError(e, { context: 'acceptExtracted' });

@@ -79,11 +79,14 @@ export default function SettingsScreen() {
   const [exporting, setExporting] = useState<null | 'csv' | 'pdf'>(null);
   const [syncingSheets, setSyncingSheets] = useState(false);
   // Google OAuth for Sheets sync (drive.file). The provider derives the correct
-  // Android redirect from the client ID.
-  const [, , promptSheetsAuth] = Google.useAuthRequest({
+  // Android redirect from the client ID. The token arrives on the `response`
+  // object (not reliably on promptAsync's return), so we complete the sync in an
+  // effect below.
+  const [, sheetsResponse, promptSheetsAuth] = Google.useAuthRequest({
     androidClientId: SHEETS_CLIENT_ID,
     scopes: SHEETS_SCOPES,
   });
+  const sheetsSyncPending = React.useRef(false);
   const [categoriesModalVisible, setCategoriesModalVisible] = useState(false);
   const [goalsModalVisible, setGoalsModalVisible] = useState(false);
   const [editProfileVisible, setEditProfileVisible] = useState(false);
@@ -116,33 +119,46 @@ export default function SettingsScreen() {
     }
   };
 
-  const runSheetsSync = async () => {
+  const runSheetsSync = () => {
     if (!isPro) { navigation.navigate('Paywall', { feature: 'sheets_sync' }); return; }
     if (!SHEETS_CONFIGURED) { Alert.alert('Sheets sync', 'Google Sheets isn’t set up in this build yet.'); return; }
     if (!user?.id) return;
+    sheetsSyncPending.current = true;
     setSyncingSheets(true);
-    try {
-      const auth = await promptSheetsAuth();
-      const token = auth?.type === 'success' ? auth.authentication?.accessToken : undefined;
-      if (!token) {
-        if (auth?.type !== 'success' && auth?.type !== 'cancel' && auth?.type !== 'dismiss') {
-          Alert.alert('Sheets sync', 'Could not connect to Google. Please try again.');
-        }
-        return;
-      }
-      const res = await pushTransactionsToSheet(user.id, token);
-      if (res.ok) {
-        Alert.alert('Synced to Google Sheets', `${res.rows} transactions synced.`, [
-          { text: 'Open sheet', onPress: () => Linking.openURL(res.url) },
-          { text: 'Done', style: 'cancel' },
-        ]);
-      } else if (res.reason !== 'cancelled') {
-        Alert.alert('Sheets sync', res.message ?? 'Could not sync. Please try again.');
-      }
-    } finally {
-      setSyncingSheets(false);
-    }
+    promptSheetsAuth();
   };
+
+  // Complete the sync once Google returns — the access token is on the response
+  // object (the well-known expo-auth-session behavior), with a params fallback.
+  useEffect(() => {
+    if (!sheetsSyncPending.current || !sheetsResponse) return;
+    (async () => {
+      try {
+        const token = sheetsResponse.type === 'success'
+          ? (sheetsResponse.authentication?.accessToken ?? (sheetsResponse as any).params?.access_token)
+          : undefined;
+        if (!token) {
+          if (sheetsResponse.type !== 'cancel' && sheetsResponse.type !== 'dismiss') {
+            Alert.alert('Sheets sync', 'Could not connect to Google. Please try again.');
+          }
+          return;
+        }
+        if (!user?.id) return;
+        const res = await pushTransactionsToSheet(user.id, token);
+        if (res.ok) {
+          Alert.alert('Synced to Google Sheets', `${res.rows} transactions synced.`, [
+            { text: 'Open sheet', onPress: () => Linking.openURL(res.url) },
+            { text: 'Done', style: 'cancel' },
+          ]);
+        } else if (res.reason !== 'cancelled') {
+          Alert.alert('Sheets sync', res.message ?? 'Could not sync. Please try again.');
+        }
+      } finally {
+        sheetsSyncPending.current = false;
+        setSyncingSheets(false);
+      }
+    })();
+  }, [sheetsResponse, user?.id]);
 
   // Opened from the NavShelf focused on a section → auto-open that modal.
   useEffect(() => {

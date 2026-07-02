@@ -27,20 +27,41 @@ const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
 const ok = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-// Known BD financial senders + generic keywords. Non-matching mail never reaches the LLM.
-const SENDER_HINTS = ['bkash', 'nagad', 'rocket', 'upay', 'bank', 'visa', 'mastercard', 'card', 'dbbl', 'brac', 'city', 'ebl', 'sslcommerz'];
-const KEYWORD_HINTS = ['tk', 'bdt', '৳', 'debit', 'credit', 'payment', 'paid', 'transaction', 'txn', 'purchase', 'spent', 'received', 'balance', 'charged'];
+// Known BD financial senders (matched loosely against the sender address) +
+// generic keywords (matched on WORD boundaries against the body so "tk" doesn't
+// hit "thank", "card" doesn't hit "discard", etc.). '৳' is a symbol, matched raw.
+const SENDER_HINTS = ['bkash', 'nagad', 'rocket', 'upay', 'dbbl', 'brac', 'ebl', 'sslcommerz', 'mastercard', 'visa'];
+const KEYWORD_HINTS = ['tk', 'bdt', 'debit', 'credit', 'payment', 'paid', 'transaction', 'txn', 'purchase', 'spent', 'received', 'balance', 'charged', 'debited', 'credited'];
 
 function looksFinancial(from: string, subject: string, text: string): boolean {
-  const hay = `${from} ${subject} ${text}`.toLowerCase();
-  return SENDER_HINTS.some((s) => hay.includes(s)) || KEYWORD_HINTS.some((k) => hay.includes(k));
+  const fromL = from.toLowerCase();
+  if (SENDER_HINTS.some((s) => fromL.includes(s))) return true;
+  const hay = `${subject} ${text}`.toLowerCase();
+  if (hay.includes('৳')) return true;
+  return KEYWORD_HINTS.some((k) => new RegExp(`\\b${k}\\b`).test(hay));
 }
 
-// Strip OTP / one-time codes so they're never stored or sent to the LLM.
-function scrubOtp(text: string): string {
+// Redact sensitive PII before storage OR the LLM: OTP/one-time codes AND long
+// digit runs (account/card numbers, 9+ digits) — transaction amounts are short
+// (< 9 digits) so they're preserved for extraction + grounding.
+function scrubSensitive(text: string): string {
   return text
     .replace(/(otp|one[-\s]?time|verification|security|passcode|code)[^\d]{0,20}\d{3,8}/gi, '$1 [redacted]')
-    .replace(/\b\d{4,8}\b(?=\s*(is your|otp|code|pin))/gi, '[redacted]');
+    .replace(/\b\d{4,8}\b(?=\s*(is your|otp|code|pin))/gi, '[redacted]')
+    .replace(/\b[xX*]{2,}\d{2,6}\b/g, '[redacted]')   // masked card/acct: ****1234
+    .replace(/\b\d{9,}\b/g, '[redacted]');            // full account/card numbers
+}
+
+// The amount must appear in the email as a standalone number — handles decimals
+// (1234.56 vs a rounded 1235) and rejects substring hits (a year, acct fragment).
+function amountIsGrounded(amount: number, text: string): boolean {
+  const norm = text.replace(/,/g, '');
+  const forms = new Set([String(amount), amount.toFixed(2), amount.toFixed(0), String(Math.round(amount))]);
+  for (const f of forms) {
+    const esc = f.replace(/\./g, '\\.');
+    if (new RegExp(`(?<![\\d.])${esc}(?![\\d])`).test(norm)) return true;
+  }
+  return false;
 }
 
 async function sha256(s: string): Promise<string> {
@@ -102,28 +123,29 @@ Deno.serve(async (req) => {
     const from = String(form.get('from') ?? '');
     const to = String(form.get('to') ?? '');
     const subject = String(form.get('subject') ?? '');
-    const text = String(form.get('text') ?? form.get('html') ?? '');
+    const text = String(form.get('text') || form.get('html') || '');
     if (!to || !text) return ok({ message: 'nothing to process' });
 
-    // 3. Match user by the forwarding alias (any recipient address). FIX for the
-    //    old bug that used the first active connection.
+    // 3. Match user by the forwarding alias (any recipient address). Take the
+    //    first matching connection — don't fail if the mail lists 2+ aliases.
     const candidates = emailsFrom(to, form.get('envelope'));
     if (!candidates.length) return ok({ message: 'no recipient' });
-    const { data: conn } = await supabase
+    const { data: conns } = await supabase
       .from('email_sms_connections')
       .select('user_id')
       .eq('connection_type', 'email').eq('is_active', true)
       .in('forwarding_alias', candidates)
-      .maybeSingle();
-    if (!conn) return ok({ message: 'no matching connection' });
-    const userId = conn.user_id as string;
+      .limit(1);
+    if (!conns?.length) return ok({ message: 'no matching connection' });
+    const userId = conns[0].user_id as string;
 
     // 4. Financial filter — drop non-financial mail before it touches the LLM.
     if (!looksFinancial(from, subject, text)) return ok({ message: 'not financial' });
 
-    // 5. OTP scrub + dedup key (no provider message-id in parsed mode → content hash).
-    const clean = scrubOtp(`${subject}\n${text}`).slice(0, 4000);
-    const sourceHash = await sha256(`${candidates[0]}|${from}|${subject}|${text.slice(0, 400)}`);
+    // 5. Scrub PII + dedup key. Hash the FULL body (not a 400-char prefix) so two
+    //    different transactions sharing templated boilerplate don't collide.
+    const clean = scrubSensitive(`${subject}\n${text}`).slice(0, 4000);
+    const sourceHash = await sha256(`${userId}|${from}|${subject}|${text}`);
 
     // 6. Extract + categorize (grounded).
     const { data: profile } = await supabase.from('profiles').select('currency').eq('id', userId).maybeSingle();
@@ -132,9 +154,8 @@ Deno.serve(async (req) => {
     const ex = await extract(clean, categories ?? [], currency);
     if (!ex || !ex.is_transaction || !ex.amount || ex.amount <= 0) return ok({ message: 'no transaction found' });
 
-    // Grounding guard: the amount must actually appear in the email text.
-    const amountStr = String(Math.round(ex.amount));
-    if (!text.replace(/,/g, '').includes(amountStr)) return ok({ message: 'amount not grounded', amount: ex.amount });
+    // Grounding guard: the amount must appear in the email as a standalone number.
+    if (!amountIsGrounded(ex.amount, text)) return ok({ message: 'amount not grounded', amount: ex.amount });
 
     const matched = (categories ?? []).find((c) => c.name.toLowerCase() === (ex.category ?? '').toLowerCase());
 
@@ -153,10 +174,11 @@ Deno.serve(async (req) => {
       confidence: ex.confidence ?? 0.5,
       status: 'pending',
     }, { onConflict: 'user_id,source_hash', ignoreDuplicates: true });
-    if (error) return ok({ error: error.message }, 500);
+    if (error) { console.error('stage error:', error.message); return ok({ error: 'stage_failed' }, 500); }
 
     return ok({ success: true, staged: true });
   } catch (e) {
-    return ok({ error: (e as Error).message }, 500);
+    console.error('process-forwarded-email:', (e as Error).message);
+    return ok({ error: 'processing_failed' }, 500);
   }
 });
