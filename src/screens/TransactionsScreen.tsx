@@ -86,7 +86,9 @@ export default function TransactionsScreen() {
   const [configuredIncome, setConfiguredIncome] = useState(0);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState<FilterOption>('all');
+  // Default to the current month so the page matches the Home dashboard's
+  // monthly scope (Home shows this month's spend vs budget). "All" is one tap away.
+  const [filter, setFilter] = useState<FilterOption>('month');
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [showPicker, setShowPicker] = useState(false);
   const [customRange, setCustomRange] = useState<DateRange | null>(null);
@@ -200,8 +202,12 @@ export default function TransactionsScreen() {
         else txIncome += Number(tx.deposit) || 0;
       }
     }
-    return { spent, income: configuredIncome + txIncome };
-  }, [filteredAndGrouped, configuredIncome]);
+    // configuredIncome is a MONTHLY figure — only fold it into the monthly view.
+    // Other scopes (today/week/all/custom) show logged income for that range so
+    // the phantom salary isn't added to an all-time or weekly total.
+    const baseIncome = filter === 'month' ? configuredIncome : 0;
+    return { spent, income: baseIncome + txIncome };
+  }, [filteredAndGrouped, configuredIncome, filter]);
 
   const customChipLabel = customRange
     ? `${fmtShort(customRange.start)} – ${fmtShort(customRange.end)}`
