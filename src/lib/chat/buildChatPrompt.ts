@@ -16,6 +16,7 @@ import {
   BUDGET_RULES,
   GOAL_RULES,
   INVESTMENT_RULES,
+  DEBT_RULES,
   CRITICAL_RULES,
   type ContextInputs,
 } from './promptBlocks';
@@ -36,6 +37,7 @@ export function buildChatPrompt(
       BUDGET_RULES,
       GOAL_RULES,
       INVESTMENT_RULES,
+      DEBT_RULES,
       CRITICAL_RULES
     );
   }

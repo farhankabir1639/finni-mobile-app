@@ -436,17 +436,25 @@ export default function HomeScreen() {
       const now = new Date();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
       const [{ data: txData }, { data: incomeData }] = await Promise.all([
-        supabase.from('transactions').select('withdrawal, type').eq('user_id', user.id).gte('date', monthStart),
+        supabase.from('transactions').select('withdrawal, deposit, type').eq('user_id', user.id).gte('date', monthStart),
         supabase.from('income').select('amount, frequency').eq('user_id', user.id),
       ]);
+      // Spend + any income logged THIS MONTH (chat income-tag, etc.).
       let monthTotal = 0;
-      (txData ?? []).forEach(tx => { if (tx.type === 'expense') monthTotal += Number(tx.withdrawal) || 0; });
-      const monthlyIncome = (incomeData ?? []).reduce((sum, r) => {
+      let monthIncomeLogged = 0;
+      (txData ?? []).forEach(tx => {
+        if (tx.type === 'expense') monthTotal += Number(tx.withdrawal) || 0;
+        else monthIncomeLogged += Number(tx.deposit) || 0;
+      });
+      const configuredIncome = (incomeData ?? []).reduce((sum, r) => {
         const a = Number(r.amount) || 0;
         if (r.frequency === 'weekly') return sum + a * (52 / 12);
         if (r.frequency === 'annual') return sum + a / 12;
         return sum + a;
       }, 0);
+      // Total income = configured monthly income + additional income logged this
+      // month. Matches the Transactions page (configured + this-month deposits).
+      const monthlyIncome = configuredIncome + monthIncomeLogged;
       setMonthUsedPct(monthlyIncome > 0 ? Math.min(100, Math.round((monthTotal / monthlyIncome) * 100)) : 0);
       setBudgetLeft(Math.max(0, monthlyIncome - monthTotal));
       setMonthlyBudget(monthlyIncome);

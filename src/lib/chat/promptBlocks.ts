@@ -164,6 +164,20 @@ Do NOT emit TRANSACTION_DATA for investments. Use INVESTMENT_DATA only.
 Do NOT confuse regular expenses with investments. "Bought groceries" = expense. "Bought shares" = investment.
 If the user asks about their portfolio, use the investment data above to answer directly.`;
 
+export const DEBT_RULES = `DEBT / LIABILITY TRACKING:
+If the user mentions TAKING ON or OWING a debt — a loan, mortgage, credit-card balance, or money owed to someone (e.g. "I took a 50000 personal loan", "I owe 20000 on my credit card", "my car loan is 300000") — record it on their Net Worth as a liability:
+- Parse: a short name, the amount owed, and the liability type
+- debt_type must be one of: debt, loan, credit_card, mortgage, other
+- Respond with a brief confirmation, then emit on its own line:
+  DEBT_DATA:{"name": "Car loan", "amount": 300000, "debt_type": "loan"}
+Examples:
+- "took a 50000 personal loan" → {"name": "Personal loan", "amount": 50000, "debt_type": "loan"}
+- "I owe 20000 on my credit card" → {"name": "Credit card", "amount": 20000, "debt_type": "credit_card"}
+- "my home loan balance is 4500000" → {"name": "Home loan", "amount": 4500000, "debt_type": "mortgage"}
+IMPORTANT: Taking on a debt is NOT a spend — do NOT emit TRANSACTION_DATA for it.
+But REPAYING a debt IS a normal expense (e.g. "paid 5000 toward my car loan") — use TRANSACTION_DATA for repayments, not DEBT_DATA.
+If the same debt is mentioned again with a new balance, emit DEBT_DATA again with the same name — it updates the existing entry.`;
+
 export const CRITICAL_RULES = `CRITICAL RULES — YOU MUST FOLLOW THESE EXACTLY:
 1. Every time you log a transaction, your response MUST end with TRANSACTION_DATA on its own line.
 2. Format: TRANSACTION_DATA:{"amount": number, "description": "string", "category_id": "CategoryName", "type": "expense"|"income"}

@@ -713,6 +713,7 @@ const GOAL_UPDATE_REGEX = /GOAL_UPDATE:\s*(\{[\s\S]*?\})(?:\s|$)/;
 const GOAL_CREATE_REGEX = /GOAL_CREATE:\s*(\{[\s\S]*?\})(?:\s|$)/;
 const CATEGORY_BUDGET_REGEX = /CATEGORY_BUDGET:\s*(\{[\s\S]*?\})(?:\s|$)/;
 const INVESTMENT_DATA_REGEX = /INVESTMENT_DATA:\s*(\{[\s\S]*?\})(?:\s|$)/;
+const DEBT_DATA_REGEX = /DEBT_DATA:\s*(\{[\s\S]*?\})(?:\s|$)/;
 const STANDALONE_CATEGORY_CREATE_REGEX = /✅ Created '([^']+)' category/i;
 
 const CATEGORY_EMOJI_MAP: Record<string, string> = {
@@ -745,6 +746,7 @@ function extractTransactionData(text: string): {
   goalCreate: { name: string; target_amount: number; goal_type: string } | null;
   categoryBudgetUpdate: { category_name: string; budget: number } | null;
   investmentData: { name: string; ticker?: string; asset_type: string; quantity: number; buy_price: number; action: 'buy' | 'sell' } | null;
+  debtData: { name: string; amount: number; debt_type: string } | null;
   txParseError: boolean;
 } {
   const txMatch = text.match(TRANSACTION_DATA_REGEX); // kept for single-match compat below
@@ -842,7 +844,25 @@ function extractTransactionData(text: string): {
     response = response.replace(INVESTMENT_DATA_REGEX, '').trim();
   }
 
-  return { response, txData, txDataArray, newCategory, goalUpdate, goalCreate, categoryBudgetUpdate, investmentData, txParseError };
+  const debtMatch = text.match(DEBT_DATA_REGEX);
+  let debtData: { name: string; amount: number; debt_type: string } | null = null;
+  if (debtMatch) {
+    try {
+      const parsed = JSON.parse(debtMatch[1]);
+      if (typeof parsed.name === 'string' && typeof parsed.amount === 'number' && parsed.amount > 0) {
+        debtData = {
+          name: parsed.name,
+          amount: parsed.amount,
+          debt_type: typeof parsed.debt_type === 'string' ? parsed.debt_type : 'debt',
+        };
+      }
+    } catch (e) {
+      if (__DEV__) console.error('[Agent] Failed to parse DEBT_DATA JSON:', e);
+    }
+    response = response.replace(DEBT_DATA_REGEX, '').trim();
+  }
+
+  return { response, txData, txDataArray, newCategory, goalUpdate, goalCreate, categoryBudgetUpdate, investmentData, debtData, txParseError };
 }
 
 export async function chatAgent(
@@ -960,7 +980,7 @@ export async function chatAgent(
     // metering when monetization is live, so a server-only METERING_ENABLED flip
     // can never cap/strand users while the client still treats everyone as Pro.
     const text = await callGeminiWithHistory(contents, 0, undefined, MONETIZATION_LIVE);
-    let { response, txData, txDataArray, newCategory, goalUpdate, goalCreate, categoryBudgetUpdate, investmentData, txParseError } = extractTransactionData(text);
+    let { response, txData, txDataArray, newCategory, goalUpdate, goalCreate, categoryBudgetUpdate, investmentData, debtData, txParseError } = extractTransactionData(text);
 
     if (txParseError) {
       return {
@@ -978,8 +998,11 @@ export async function chatAgent(
       investmentData = null;
     }
 
+    // Taking on a debt is a liability record, not a spend — don't also log a txn.
+    if (debtData && debtData.amount > 0) txData = null;
+
     // Fallback: if Gemini dropped TRANSACTION_DATA but wrote "✅ Logged $X under Y.", parse it directly
-    if (!txData && !newCategory && !investmentData) {
+    if (!txData && !newCategory && !investmentData && !debtData) {
       const loggedMatch = response.match(/✅\s+Logged\s+\$?([\d.]+)\s+under\s+([^.\n!]+)/i);
       if (loggedMatch) {
         const parsedAmount = parseFloat(loggedMatch[1]);
@@ -1008,6 +1031,8 @@ export async function chatAgent(
       response.trim() ||
       (txData
         ? `✅ Logged ${sym}${Math.abs(Number(txData.amount)).toFixed(2)} under ${fallbackCatName}.`
+        : debtData
+        ? `✅ Recorded ${debtData.name} (${sym}${Math.round(debtData.amount).toLocaleString()}) as a liability on your net worth.`
         : "I couldn't process that. Please try again.");
 
     // Bug 1 fix: Detect standalone category creation (no TRANSACTION_DATA or NEW_CATEGORY tags)
@@ -1467,6 +1492,33 @@ export async function chatAgent(
           });
           if (__DEV__) console.log(`[Agent1] Investment created: "${investmentData.name}" qty=${investmentData.quantity} price=${investmentData.buy_price}`);
         }
+      }
+    }
+
+    // Record a debt/liability on the user's Net Worth if Gemini emitted DEBT_DATA.
+    // Same-named liability → update its balance; else insert. Requires the
+    // net_worth migration (falls through silently if the table is absent).
+    if (debtData && debtData.amount > 0) {
+      const validDebtTypes = ['debt', 'loan', 'credit_card', 'mortgage', 'other'];
+      const dtype = validDebtTypes.includes(debtData.debt_type) ? debtData.debt_type : 'debt';
+      try {
+        const { data: existingDebt } = await supabase
+          .from('net_worth_items')
+          .select('id')
+          .eq('user_id', userId).eq('kind', 'liability')
+          .ilike('name', debtData.name)
+          .maybeSingle();
+        if (existingDebt) {
+          await supabase.from('net_worth_items')
+            .update({ value: debtData.amount, item_type: dtype, updated_at: new Date().toISOString() })
+            .eq('id', existingDebt.id);
+        } else {
+          await supabase.from('net_worth_items')
+            .insert({ user_id: userId, kind: 'liability', name: debtData.name, item_type: dtype, value: debtData.amount });
+        }
+        if (__DEV__) console.log(`[Agent1] Debt recorded: "${debtData.name}" ${debtData.amount} (${dtype})`);
+      } catch (e) {
+        captureError(e, { context: 'chatAgent.debt', userId });
       }
     }
 
